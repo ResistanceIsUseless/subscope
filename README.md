@@ -72,13 +72,17 @@ subscope --domain example.com --geo
 - `-d, --domain`: Target domain to enumerate
 - `-c, --config`: Configuration file path
 - `-o, --output`: Output file path (default: results.json)
-- `-f, --format`: Output format (json, csv, massdns, dnsx)
+- `-f, --format`: Output format (json, csv, massdns, dnsx, aquatone, eyewitness)
 
 #### Analysis Modes
 - `-a, --all`: Run all phases including CT, AlterX, RDAP, and persistence
 - `-g, --geo`: Enable geographic DNS analysis from multiple regions
 - `-v, --verbose`: Enable verbose logging
 - `-i, --interactive`: Run in interactive TUI mode (not yet implemented)
+
+#### Input/Output Options
+- `--input-domains`: Path to file containing additional domains to scan
+- `--merge`: Merge input domains with discovered domains (default: replace)
 
 #### Information
 - `-s, --stats`: Show domain history statistics
@@ -98,6 +102,26 @@ subscope -d example.com -f massdns -o domains.txt
 
 # dnsx format
 subscope -d example.com -f dnsx -o dnsx-input.txt
+
+# Aquatone format (domain,ip,port)
+subscope -d example.com -f aquatone -o aquatone-input.txt
+
+# EyeWitness format (URL list)
+subscope -d example.com -f eyewitness -o eyewitness-urls.txt
+```
+
+### Input Domain Support
+```bash
+# Load domains from file and scan them instead of discovered domains
+subscope -d example.com --input-domains domains.txt
+
+# Merge input domains with discovered domains
+subscope -d example.com --input-domains domains.txt --merge
+
+# Iterative scanning example
+subscope -d example.com -o round1.json
+# Extract domains from previous scan results and scan them
+subscope -d example.com --input-domains extracted-domains.txt -o round2.json
 ```
 
 ### Geographic DNS Analysis

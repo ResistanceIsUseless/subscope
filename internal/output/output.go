@@ -124,6 +124,10 @@ func (w *Writer) WriteResults(results []enumeration.DomainResult) error {
 		return w.writeMassDNS(enumerationResult)
 	case "dnsx":
 		return w.writeDNSx(enumerationResult)
+	case "aquatone":
+		return w.writeAquatone(enumerationResult)
+	case "eyewitness":
+		return w.writeEyeWitness(enumerationResult)
 	default:
 		return fmt.Errorf("unsupported output format: %s", w.config.Output.Format)
 	}
@@ -250,6 +254,58 @@ func (w *Writer) writeDNSx(result EnumerationResult) error {
 	}
 
 	fmt.Printf("DNSx format written to: %s (%d domains)\n", 
+		w.config.Output.File, count)
+	return nil
+}
+
+func (w *Writer) writeAquatone(result EnumerationResult) error {
+	file, err := os.Create(w.config.Output.File)
+	if err != nil {
+		return fmt.Errorf("failed to create output file: %w", err)
+	}
+	defer file.Close()
+
+	// Aquatone expects: domain,ip,port format
+	count := 0
+	for _, domain := range result.ResolvedDomains {
+		if domain.DNSRecords != nil {
+			if ip, exists := domain.DNSRecords["A"]; exists {
+				// Add common HTTP/HTTPS ports
+				_, err1 := fmt.Fprintf(file, "%s,%s,80\n", domain.Domain, ip)
+				_, err2 := fmt.Fprintf(file, "%s,%s,443\n", domain.Domain, ip)
+				if err1 != nil || err2 != nil {
+					return fmt.Errorf("failed to write aquatone entry: %v", err1)
+				}
+				count += 2
+			}
+		}
+	}
+
+	fmt.Printf("Aquatone format written to: %s (%d entries)\n", 
+		w.config.Output.File, count)
+	return nil
+}
+
+func (w *Writer) writeEyeWitness(result EnumerationResult) error {
+	file, err := os.Create(w.config.Output.File)
+	if err != nil {
+		return fmt.Errorf("failed to create output file: %w", err)
+	}
+	defer file.Close()
+
+	// EyeWitness expects simple URL list
+	count := 0
+	for _, domain := range result.ResolvedDomains {
+		// Add both HTTP and HTTPS URLs
+		_, err1 := fmt.Fprintf(file, "http://%s\n", domain.Domain)
+		_, err2 := fmt.Fprintf(file, "https://%s\n", domain.Domain)
+		if err1 != nil || err2 != nil {
+			return fmt.Errorf("failed to write eyewitness entry: %v", err1)
+		}
+		count += 2
+	}
+
+	fmt.Printf("EyeWitness format written to: %s (%d URLs)\n", 
 		w.config.Output.File, count)
 	return nil
 }

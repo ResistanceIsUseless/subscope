@@ -12,7 +12,7 @@ import (
 	"github.com/resistanceisuseless/subscope/internal/alterx"
 	"github.com/resistanceisuseless/subscope/internal/arin"
 	"github.com/resistanceisuseless/subscope/internal/config"
-	// "github.com/resistanceisuseless/subscope/internal/ct" // TEMPORARILY DISABLED
+	"github.com/resistanceisuseless/subscope/internal/ct"
 	"github.com/resistanceisuseless/subscope/internal/dns"
 	"github.com/resistanceisuseless/subscope/internal/enumeration"
 	"github.com/resistanceisuseless/subscope/internal/http"
@@ -34,7 +34,7 @@ func NewSubScope(cfg *config.Config) *SubScope {
 	}
 }
 
-func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAnalysis bool) error {
+func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAnalysis bool, inputDomainsPath string, mergeMode bool) error {
 	fmt.Printf("Starting SubScope enumeration for domain: %s\n", domain)
 	
 	enumerator := enumeration.New(s.config)
@@ -46,6 +46,15 @@ func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAn
 		fmt.Printf("Warning: Wildcard detection failed: %v\n", err)
 	}
 	
+	// Phase 0.5: Load input domains (if provided)
+	var inputDomainList []string
+	if inputDomainsPath != "" {
+		inputDomainList, err = enumerator.LoadInputDomains(inputDomainsPath)
+		if err != nil {
+			return fmt.Errorf("failed to load input domains: %w", err)
+		}
+	}
+	
 	// Phase 1: Passive enumeration
 	fmt.Println("Phase 1: Passive enumeration...")
 	domains, err := enumerator.RunPassiveEnumeration(ctx, domain)
@@ -53,8 +62,40 @@ func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAn
 		return fmt.Errorf("passive enumeration failed: %w", err)
 	}
 	
+	// Merge input domains with discovered domains if merge flag is set
+	if len(inputDomainList) > 0 {
+		if mergeMode {
+			fmt.Printf("Merging %d input domains with %d discovered domains\n", len(inputDomainList), len(domains))
+			// Create a map to avoid duplicates
+			domainMap := make(map[string]bool)
+			for _, d := range domains {
+				domainMap[d] = true
+			}
+			for _, d := range inputDomainList {
+				if !domainMap[d] {
+					domains = append(domains, d)
+					domainMap[d] = true
+				}
+			}
+			fmt.Printf("Total unique domains after merge: %d\n", len(domains))
+		} else {
+			// Replace discovered domains with input domains
+			fmt.Printf("Using %d input domains instead of discovered domains\n", len(inputDomainList))
+			domains = inputDomainList
+		}
+	}
+	
 	// Process discovered domains
 	results := enumerator.ProcessDomains(domains)
+	
+	// Add input domains to results if they exist
+	if len(inputDomainList) > 0 && !mergeMode {
+		inputResults := enumerator.ProcessInputDomains(inputDomainList)
+		// Only add input results if we're not merging (to avoid duplicates)
+		if len(inputDomainList) != len(domains) {
+			results = append(results, inputResults...)
+		}
+	}
 	
 	// Phase 1.1: Zone transfer attempt (early in the process)
 	fmt.Println("Phase 1.1: Zone transfer (AXFR) attempt...")
@@ -95,19 +136,18 @@ func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAn
 	// Optional phases (run only with --all flag)
 	var ctDomains []string
 	if allPhases {
-		// Phase 1.5: Certificate Transparency log analysis - TEMPORARILY DISABLED
-		// fmt.Println("Phase 1.5: Certificate Transparency log analysis...")
-		// ctAnalyzer := ct.New(s.config)
-		// ctDomains, err = ctAnalyzer.QueryCertificates(ctx, domain)
-		// if err != nil {
-		// 	fmt.Printf("Warning: Certificate Transparency query failed: %v\n", err)
-		// } else if len(ctDomains) > 0 {
-		// 	// Add CT domains to results
-		// 	ctResults := enumerator.ProcessCTDomains(ctDomains)
-		// 	results = append(results, ctResults...)
-		// 	fmt.Printf("Added %d CT domains to enumeration results\n", len(ctDomains))
-		// }
-		fmt.Println("Phase 1.5: Certificate Transparency log analysis - TEMPORARILY DISABLED")
+		// Phase 1.5: Certificate Transparency log analysis
+		fmt.Println("Phase 1.5: Certificate Transparency log analysis...")
+		ctAnalyzer := ct.New(s.config)
+		ctDomains, err = ctAnalyzer.QueryCertificates(ctx, domain)
+		if err != nil {
+			fmt.Printf("Warning: Certificate Transparency query failed: %v\n", err)
+		} else if len(ctDomains) > 0 {
+			// Add CT domains to results
+			ctResults := enumerator.ProcessCTDomains(ctDomains)
+			results = append(results, ctResults...)
+			fmt.Printf("Added %d CT domains to enumeration results\n", len(ctDomains))
+		}
 
 		// Phase 1.6: Dynamic wordlist generation with AlterX (after HTTP to include new findings)
 		fmt.Println("Phase 1.6: Dynamic wordlist generation...")
@@ -250,8 +290,8 @@ func main() {
 		configLong   = flag.String("config", "", "Configuration file path")
 		output       = flag.String("o", "results.json", "Output file path")
 		outputLong   = flag.String("output", "results.json", "Output file path")
-		format       = flag.String("f", "json", "Output format (json, csv, massdns, dnsx)")
-		formatLong   = flag.String("format", "json", "Output format (json, csv, massdns, dnsx)")
+		format       = flag.String("f", "json", "Output format (json, csv, massdns, dnsx, aquatone, eyewitness)")
+		formatLong   = flag.String("format", "json", "Output format (json, csv, massdns, dnsx, aquatone, eyewitness)")
 		interactive  = flag.Bool("i", false, "Run in interactive TUI mode")
 		interactiveLong = flag.Bool("interactive", false, "Run in interactive TUI mode")
 		createConfig = flag.Bool("create-config", false, "Create default configuration file")
@@ -262,6 +302,8 @@ func main() {
 		allPhasesLong = flag.Bool("all", false, "Run all phases including CT, AlterX, RDAP, and persistence")
 		geoAnalysis  = flag.Bool("g", false, "Enable geographic DNS analysis")
 		geoLong      = flag.Bool("geo", false, "Enable geographic DNS analysis")
+		inputDomains = flag.String("input-domains", "", "Path to file containing additional domains to scan")
+		mergeDomains = flag.Bool("merge", false, "Merge input domains with discovered domains")
 		verbose      = flag.Bool("v", false, "Enable verbose logging")
 		verboseLong  = flag.Bool("verbose", false, "Enable verbose logging")
 	)
@@ -343,11 +385,15 @@ func main() {
 		fmt.Println("       subscope --domain example.com")
 		fmt.Println("       subscope -d example.com -a (run all phases)")
 		fmt.Println("       subscope -d example.com -g (geographic DNS analysis)")
+		fmt.Println("       subscope -d example.com --input-domains domains.txt")
+		fmt.Println("       subscope -d example.com --input-domains domains.txt --merge")
 		fmt.Println("       subscope -d example.com -s (show statistics)")
 		fmt.Println("       subscope -d example.com --new-since 2024-01-01")
 		fmt.Println("\nDefault phases: Wildcard detection, Passive enumeration, HTTP analysis, RDNS")
 		fmt.Println("All phases (-a/--all): Adds Certificate Transparency, AlterX, RDAP, and persistence tracking")
 		fmt.Println("Geographic DNS (-g/--geo): Queries from multiple global regions for geo-specific subdomains")
+		fmt.Println("Input domains (--input-domains): Load additional domains from file")
+		fmt.Println("Merge mode (--merge): Merge input domains with discovered domains (default: replace)")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
@@ -372,7 +418,7 @@ func main() {
 	subscope := NewSubScope(cfg)
 	
 	ctx := context.Background()
-	if err := subscope.Run(ctx, targetDomain, targetAllPhases, targetGeoAnalysis); err != nil {
+	if err := subscope.Run(ctx, targetDomain, targetAllPhases, targetGeoAnalysis, *inputDomains, *mergeDomains); err != nil {
 		log.Fatalf("Enumeration failed: %v", err)
 	}
 

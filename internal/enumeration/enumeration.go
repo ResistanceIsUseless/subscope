@@ -4,7 +4,10 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"net"
+	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -222,4 +225,90 @@ func (e *Enumerator) ProcessGeoDNSDomains(geoDNSDomains []string) []DomainResult
 	}
 	
 	return results
+}
+
+// LoadInputDomains loads domains from a file for iterative scanning
+func (e *Enumerator) LoadInputDomains(path string) ([]string, error) {
+	if path == "" {
+		return nil, nil
+	}
+	
+	fmt.Printf("Loading input domains from: %s\n", path)
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open input domains file: %w", err)
+	}
+	defer file.Close()
+	
+	var domains []string
+	scanner := bufio.NewScanner(file)
+	lineNum := 0
+	
+	for scanner.Scan() {
+		lineNum++
+		domain := strings.TrimSpace(scanner.Text())
+		
+		// Skip empty lines and comments
+		if domain == "" || strings.HasPrefix(domain, "#") {
+			continue
+		}
+		
+		// Validate domain format
+		if isValidDomain(domain) {
+			domains = append(domains, domain)
+		} else if e.config.Verbose {
+			fmt.Printf("Warning: Invalid domain format on line %d: %s\n", lineNum, domain)
+		}
+	}
+	
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("error reading input domains file: %w", err)
+	}
+	
+	fmt.Printf("Loaded %d valid domains from input file\n", len(domains))
+	return domains, nil
+}
+
+// ProcessInputDomains processes domains from input file
+func (e *Enumerator) ProcessInputDomains(inputDomains []string) []DomainResult {
+	var results []DomainResult
+	
+	for _, domain := range inputDomains {
+		result := DomainResult{
+			Domain:    domain,
+			Status:    "discovered",
+			Source:    "input_file",
+			Timestamp: time.Now(),
+		}
+		results = append(results, result)
+	}
+	
+	return results
+}
+
+// isValidDomain validates domain name format
+func isValidDomain(domain string) bool {
+	// Basic domain validation
+	if len(domain) == 0 || len(domain) > 253 {
+		return false
+	}
+	
+	// Check for valid domain pattern
+	domainRegex := regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$`)
+	if !domainRegex.MatchString(domain) {
+		return false
+	}
+	
+	// Additional check: must have at least one dot (be a subdomain or domain)
+	if !strings.Contains(domain, ".") {
+		return false
+	}
+	
+	// Validate using Go's built-in validation
+	if _, err := net.LookupHost(domain); err != nil {
+		// Don't fail validation just because DNS lookup fails
+		// The domain format might be valid even if it doesn't resolve
+	}
+	
+	return true
 }
