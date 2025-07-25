@@ -1,0 +1,80 @@
+# Binaries and executables (ignore binary but not source)
+/subscope
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+
+# Test files and temporary files
+test_*
+*_test.go.bak
+*.tmp
+*.temp
+single_domain.txt
+test_domains.txt
+test_results.*
+
+# Output files (except examples)
+results.json
+results.csv
+results.txt
+*.log
+*.out
+domains.txt
+dnsx-input.txt
+
+# Configuration files (user-specific)
+config.yaml
+.subscope/
+
+# Documentation files (except README.md)
+*.md
+!README.md
+
+# Claude-specific files
+CLAUDE.md
+claude_*
+.claude/
+
+# Go specific
+*.orig
+vendor/
+.vscode/
+.idea/
+
+# OS specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Local environment files
+.env
+.env.local
+.env.*.local
+
+# Coverage files
+*.coverprofile
+coverage.out
+
+# Dependency directories
+node_modules/
+
+# IDE files
+*.swp
+*.swo
+*~
+
+# Build artifacts
+dist/
+build/
