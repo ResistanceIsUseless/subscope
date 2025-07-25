@@ -238,6 +238,9 @@ func (r *Resolver) collectAdditionalRecords(ctx context.Context, domain string, 
 	// Collect CNAME records
 	r.collectCNAME(client, dnsServers, domain, result)
 	
+	// Collect TXT records
+	r.collectTXT(client, dnsServers, domain, result)
+	
 	// Collect SOA records for the domain's zone
 	r.collectSOA(client, dnsServers, domain, result)
 }
@@ -265,6 +268,35 @@ func (r *Resolver) collectCNAME(client *dns.Client, servers []string, domain str
 					}
 					return // Found CNAME, no need to try other servers
 				}
+			}
+		}
+	}
+}
+
+// collectTXT attempts to collect TXT records
+func (r *Resolver) collectTXT(client *dns.Client, servers []string, domain string, result *enumeration.DomainResult) {
+	msg := &dns.Msg{}
+	msg.SetQuestion(dns.Fqdn(domain), dns.TypeTXT)
+	
+	for _, server := range servers {
+		resp, _, err := client.Exchange(msg, server)
+		if err != nil {
+			continue
+		}
+		
+		if resp.Rcode == dns.RcodeSuccess {
+			var txtRecords []string
+			for _, ans := range resp.Answer {
+				if txt, ok := ans.(*dns.TXT); ok {
+					// Join all TXT strings (as a single TXT record can have multiple strings)
+					txtRecord := strings.Join(txt.Txt, "")
+					txtRecords = append(txtRecords, txtRecord)
+				}
+			}
+			if len(txtRecords) > 0 {
+				// Join multiple TXT records with semicolon separator
+				result.DNSRecords["TXT"] = strings.Join(txtRecords, "; ")
+				return // Found TXT records, no need to try other servers
 			}
 		}
 	}

@@ -47,8 +47,8 @@ func (h *Analyzer) AnalyzeDomains(ctx context.Context, domains []string, targetD
 	
 	// Limit to reasonable number for HTTP analysis
 	analyzeCount := len(domains)
-	if analyzeCount > 100 {
-		analyzeCount = 100
+	if analyzeCount > 500 {
+		analyzeCount = 500
 		fmt.Printf("Limiting httpx analysis to first %d domains\n", analyzeCount)
 	}
 	

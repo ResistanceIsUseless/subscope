@@ -13,9 +13,11 @@ import (
 )
 
 type EnumerationResult struct {
-	Metadata   Metadata       `json:"metadata"`
-	Statistics Statistics     `json:"statistics"`
-	Results    []enumeration.DomainResult `json:"results"`
+	Metadata          Metadata                   `json:"metadata"`
+	Statistics        Statistics                 `json:"statistics"`
+	ResolvedDomains   []enumeration.DomainResult `json:"resolved_domains"`
+	DiscoveredDomains []enumeration.DomainResult `json:"discovered_domains,omitempty"`
+	FailedGenerated   []enumeration.DomainResult `json:"failed_generated,omitempty"`
 }
 
 type Metadata struct {
@@ -32,9 +34,11 @@ type ToolInfo struct {
 }
 
 type Statistics struct {
-	DomainsFound   int           `json:"domains_found"`
-	ExecutionTime  time.Duration `json:"execution_time"`
-	Sources        []string      `json:"sources"`
+	DomainsResolved    int           `json:"domains_resolved"`
+	DomainsDiscovered  int           `json:"domains_discovered"`
+	DomainsGenerated   int           `json:"domains_generated_failed"`
+	ExecutionTime      time.Duration `json:"execution_time"`
+	Sources            []string      `json:"sources"`
 }
 
 type Writer struct {
@@ -64,6 +68,29 @@ func (w *Writer) WriteResults(results []enumeration.DomainResult) error {
 		filteredResults = filtered
 	}
 	
+	// Separate domains into three categories
+	var resolvedDomains []enumeration.DomainResult     // Successfully resolved domains
+	var discoveredDomains []enumeration.DomainResult   // Real domains found but not resolved/failed
+	var failedGenerated []enumeration.DomainResult     // AlterX generated domains that failed
+	
+	for _, result := range filteredResults {
+		if result.Status == "resolved" || result.Status == "new_resolved" {
+			// Ensure resolved domains have all required DNS records
+			if result.DNSRecords == nil {
+				result.DNSRecords = make(map[string]string)
+			}
+			// Always include IP address for resolved domains (should already be there)
+			resolvedDomains = append(resolvedDomains, result)
+		} else if result.Source == "alterx" && (result.Status == "failed" || result.Status == "no_records") {
+			// AlterX generated domains that failed to resolve - these are likely non-existent
+			failedGenerated = append(failedGenerated, result)
+		} else {
+			// Real domains found through enumeration but failed to resolve or are wildcards
+			// These could be legitimate domains that are temporarily down or have no A records
+			discoveredDomains = append(discoveredDomains, result)
+		}
+	}
+	
 	// Create comprehensive result structure
 	enumerationResult := EnumerationResult{
 		Metadata: Metadata{
@@ -74,14 +101,18 @@ func (w *Writer) WriteResults(results []enumeration.DomainResult) error {
 				Version: "0.1.0",
 			},
 			Target:   w.config.Target.Domain,
-			ScanType: "passive+ct+alterx+httpx+rdns+resolution",
+			ScanType: "passive+zone_transfer+httpx+rdns+geodns+resolution",
 		},
 		Statistics: Statistics{
-			DomainsFound:  len(filteredResults),
-			ExecutionTime: time.Since(startTime),
-			Sources:       []string{"subfinder", "certificate_transparency", "alterx", "httpx", "rdns", "dns_resolution"},
+			DomainsResolved:   len(resolvedDomains),
+			DomainsDiscovered: len(discoveredDomains),
+			DomainsGenerated:  len(failedGenerated),
+			ExecutionTime:     time.Since(startTime),
+			Sources:           []string{"subfinder", "zone_transfer", "alterx", "httpx", "rdns", "rdns_range", "geodns", "dns_resolution"},
 		},
-		Results: filteredResults,
+		ResolvedDomains:   resolvedDomains,
+		DiscoveredDomains: discoveredDomains,
+		FailedGenerated:   failedGenerated,
 	}
 	
 	switch w.config.Output.Format {
@@ -132,8 +163,10 @@ func (w *Writer) writeCSV(result EnumerationResult) error {
 		return fmt.Errorf("failed to write CSV header: %w", err)
 	}
 
-	// Write data rows
-	for _, domain := range result.Results {
+	// Write data rows - prioritize resolved domains, then real discovered domains
+	// Exclude failed generated domains from CSV output
+	allDomains := append(result.ResolvedDomains, result.DiscoveredDomains...)
+	for _, domain := range allDomains {
 		var ipAddress, dnsRecords string
 		
 		if domain.DNSRecords != nil {
@@ -175,18 +208,22 @@ func (w *Writer) writeMassDNS(result EnumerationResult) error {
 	defer file.Close()
 
 	// Write domains with trailing dot for massdns compatibility
-	for _, domain := range result.Results {
+	// Prioritize resolved domains, then add real discovered domains (exclude failed generated)
+	allDomains := append(result.ResolvedDomains, result.DiscoveredDomains...)
+	count := 0
+	for _, domain := range allDomains {
 		// Only include resolved or discovered domains
-		if domain.Status == "resolved" || domain.Status == "discovered" {
+		if domain.Status == "resolved" || domain.Status == "discovered" || domain.Status == "new_resolved" {
 			_, err := fmt.Fprintf(file, "%s.\n", domain.Domain)
 			if err != nil {
 				return fmt.Errorf("failed to write massdns entry: %w", err)
 			}
+			count++
 		}
 	}
 
 	fmt.Printf("MassDNS format written to: %s (%d domains)\n", 
-		w.config.Output.File, len(result.Results))
+		w.config.Output.File, count)
 	return nil
 }
 
@@ -198,17 +235,21 @@ func (w *Writer) writeDNSx(result EnumerationResult) error {
 	defer file.Close()
 
 	// Write domains in simple list format for dnsx compatibility
-	for _, domain := range result.Results {
+	// Prioritize resolved domains, then add real discovered domains (exclude failed generated)
+	allDomains := append(result.ResolvedDomains, result.DiscoveredDomains...)
+	count := 0
+	for _, domain := range allDomains {
 		// Only include domains that are likely to resolve
-		if domain.Status == "resolved" || domain.Status == "discovered" {
+		if domain.Status == "resolved" || domain.Status == "discovered" || domain.Status == "new_resolved" {
 			_, err := fmt.Fprintf(file, "%s\n", domain.Domain)
 			if err != nil {
 				return fmt.Errorf("failed to write dnsx entry: %w", err)
 			}
+			count++
 		}
 	}
 
 	fmt.Printf("DNSx format written to: %s (%d domains)\n", 
-		w.config.Output.File, len(result.Results))
+		w.config.Output.File, count)
 	return nil
 }

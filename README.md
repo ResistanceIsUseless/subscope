@@ -49,28 +49,67 @@ go install -v github.com/projectdiscovery/alterx/cmd/alterx@latest
 
 ## Usage
 
+SubScope supports both short and long flag options following standard Unix conventions.
+
 ### Basic Enumeration
 ```bash
 # Default optimized pipeline (faster)
-subscope -domain example.com
+subscope -d example.com
+subscope --domain example.com
 
 # Complete pipeline with all phases
-subscope -domain example.com -all
+subscope -d example.com -a
+subscope --domain example.com --all
+
+# Geographic DNS analysis only
+subscope -d example.com -g
+subscope --domain example.com --geo
 ```
+
+### Flag Options
+
+#### Core Flags
+- `-d, --domain`: Target domain to enumerate
+- `-c, --config`: Configuration file path
+- `-o, --output`: Output file path (default: results.json)
+- `-f, --format`: Output format (json, csv, massdns, dnsx)
+
+#### Analysis Modes
+- `-a, --all`: Run all phases including CT, AlterX, RDAP, and persistence
+- `-g, --geo`: Enable geographic DNS analysis from multiple regions
+- `-v, --verbose`: Enable verbose logging
+- `-i, --interactive`: Run in interactive TUI mode (not yet implemented)
+
+#### Information
+- `-s, --stats`: Show domain history statistics
+- `--new-since`: Show new domains since date (YYYY-MM-DD)
+- `--create-config`: Create default configuration file
 
 ### Output Formats
 ```bash
 # JSON output (default)
-subscope -domain example.com -output results.json
+subscope -d example.com -o results.json
 
 # CSV format
-subscope -domain example.com -format csv -output results.csv
+subscope -d example.com -f csv -o results.csv
 
 # massdns format
-subscope -domain example.com -format massdns -output domains.txt
+subscope -d example.com -f massdns -o domains.txt
 
 # dnsx format
-subscope -domain example.com -format dnsx -output dnsx-input.txt
+subscope -d example.com -f dnsx -o dnsx-input.txt
+```
+
+### Geographic DNS Analysis
+```bash
+# Geographic analysis only (faster than --all)
+subscope -d example.com --geo
+
+# Geographic analysis with verbose output
+subscope -d example.com -g -v
+
+# Combined with custom output format
+subscope -d example.com -g -f csv -o geo-results.csv
 ```
 
 ### Configuration
@@ -90,12 +129,13 @@ This creates `~/.config/subscope/config.yaml` with customizable settings:
 
 View domain statistics:
 ```bash
-subscope -domain example.com -stats
+subscope -d example.com -s
+subscope --domain example.com --stats
 ```
 
 Show new domains discovered since a specific date:
 ```bash
-subscope -domain example.com -new-since 2024-01-01
+subscope -d example.com --new-since 2024-01-01
 ```
 
 ## Enumeration Pipeline
@@ -110,8 +150,8 @@ By default, SubScope runs these phases for faster results:
 5. **RDNS Analysis**: Performs reverse lookups on resolved IPs
 6. **Wildcard Filtering**: Removes false positives from wildcard responses
 
-### Complete Pipeline (-all flag)
-Use `-all` flag to enable all phases including:
+### Complete Pipeline (-a/--all flag)
+Use `-a` or `--all` flag to enable all phases including:
 
 1-6. All default phases above, plus:
 7. **Certificate Transparency**: Additional CT log queries (temporarily disabled)
@@ -124,6 +164,9 @@ Use `-all` flag to enable all phases including:
 ## Output Format
 
 ### JSON Output Structure
+
+SubScope now organizes results into three distinct categories for better clarity:
+
 ```json
 {
   "metadata": {
@@ -137,11 +180,13 @@ Use `-all` flag to enable all phases including:
     "scan_type": "passive+zone_transfer+httpx+rdns+geodns+resolution"
   },
   "statistics": {
-    "domains_found": 150,
+    "domains_resolved": 45,
+    "domains_discovered": 12,
+    "domains_generated_failed": 234,
     "execution_time": "5m30s",
     "sources": ["subfinder", "zone_transfer", "httpx", "rdns", "geodns"]
   },
-  "results": [
+  "resolved_domains": [
     {
       "domain": "api.example.com",
       "status": "resolved",
@@ -149,16 +194,39 @@ Use `-all` flag to enable all phases including:
         "A": "192.0.2.1",
         "A_ALL": "192.0.2.1,192.0.2.2",
         "CNAME": "api-prod.cloudfront.net",
+        "TXT": "v=spf1 include:_spf.google.com ~all",
+        "SOA": "ns-123.awsdns-12.com awsdns-hostmaster.amazon.com 1 7200 900 1209600 86400",
         "CLOUD_SERVICE": "AWS-CloudFront",
-        "CLOUD_DNS": "AWS-Route53",
-        "SOA": "ns-123.awsdns-12.com awsdns-hostmaster.amazon.com 1 7200 900 1209600 86400"
+        "CLOUD_DNS": "AWS-Route53"
       },
       "source": "subfinder",
+      "timestamp": "2025-01-25T10:25:00Z"
+    }
+  ],
+  "discovered_domains": [
+    {
+      "domain": "old-api.example.com",
+      "status": "failed",
+      "source": "subfinder",
+      "timestamp": "2025-01-25T10:25:00Z"
+    }
+  ],
+  "failed_generated": [
+    {
+      "domain": "api-dev-staging-test.example.com",
+      "status": "failed",
+      "source": "alterx",
       "timestamp": "2025-01-25T10:25:00Z"
     }
   ]
 }
 ```
+
+### Result Categories
+
+- **`resolved_domains`**: Successfully resolved domains with complete DNS information (IP addresses, CNAME, TXT, SOA records when present)
+- **`discovered_domains`**: Real domains found through legitimate enumeration sources but failed to resolve or have no A records (could be temporarily down or misconfigured)
+- **`failed_generated`**: AlterX-generated permutations that failed to resolve (likely non-existent domains created by wordlist generation)
 
 ### Domain Status Values
 - `discovered`: Found but not yet resolved
@@ -240,11 +308,16 @@ curl "https://dns.google/resolve?name=cdn.example.com&edns_client_subnet=85.10.1
 ```
 
 #### Usage
-Geographic DNS analysis is enabled with the `-all` flag:
+Geographic DNS analysis can be enabled with the dedicated `-g/--geo` flag or as part of the complete analysis with `-a/--all`:
 
 ```bash
-# Enable geographic analysis
-subscope -domain example.com -all
+# Enable geographic analysis only (faster)
+subscope -d example.com -g
+subscope --domain example.com --geo
+
+# Enable geographic analysis as part of complete pipeline
+subscope -d example.com -a
+subscope --domain example.com --all
 
 # Output includes geographic differences:
 # Phase 2.8: Geographic DNS analysis...

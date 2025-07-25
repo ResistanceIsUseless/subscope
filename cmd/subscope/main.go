@@ -34,7 +34,7 @@ func NewSubScope(cfg *config.Config) *SubScope {
 	}
 }
 
-func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool) error {
+func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAnalysis bool) error {
 	fmt.Printf("Starting SubScope enumeration for domain: %s\n", domain)
 	
 	enumerator := enumeration.New(s.config)
@@ -170,7 +170,10 @@ func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool) error
 			fmt.Printf("Added %d RDNS range-discovered domains to enumeration results\n", len(rdnsRangeDomains))
 		}
 		
-		// Phase 2.8: Geographic DNS analysis (detect region-specific subdomains)
+	}
+	
+	// Phase 2.8: Geographic DNS analysis (can run independently or with -all)
+	if allPhases || geoAnalysis {
 		fmt.Println("Phase 2.8: Geographic DNS analysis...")
 		geoDNS := dns.NewGeoDNSResolver(s.config)
 		geoResults, err := geoDNS.QueryFromAllRegions(ctx, domain)
@@ -241,18 +244,55 @@ func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool) error
 
 func main() {
 	var (
-		domain       = flag.String("domain", "", "Target domain to enumerate")
-		configPath   = flag.String("config", "", "Configuration file path")
-		output       = flag.String("output", "results.json", "Output file path")
-		format       = flag.String("format", "json", "Output format (json, csv, massdns, dnsx)")
-		interactive  = flag.Bool("interactive", false, "Run in interactive TUI mode")
+		domain       = flag.String("d", "", "Target domain to enumerate")
+		domainLong   = flag.String("domain", "", "Target domain to enumerate")
+		configPath   = flag.String("c", "", "Configuration file path")
+		configLong   = flag.String("config", "", "Configuration file path")
+		output       = flag.String("o", "results.json", "Output file path")
+		outputLong   = flag.String("output", "results.json", "Output file path")
+		format       = flag.String("f", "json", "Output format (json, csv, massdns, dnsx)")
+		formatLong   = flag.String("format", "json", "Output format (json, csv, massdns, dnsx)")
+		interactive  = flag.Bool("i", false, "Run in interactive TUI mode")
+		interactiveLong = flag.Bool("interactive", false, "Run in interactive TUI mode")
 		createConfig = flag.Bool("create-config", false, "Create default configuration file")
-		showStats    = flag.Bool("stats", false, "Show domain history statistics")
+		showStats    = flag.Bool("s", false, "Show domain history statistics")
+		showStatsLong = flag.Bool("stats", false, "Show domain history statistics")
 		showNew      = flag.String("new-since", "", "Show new domains since date (YYYY-MM-DD)")
-		allPhases    = flag.Bool("all", false, "Run all phases including CT, AlterX, RDAP, and persistence")
-		verbose      = flag.Bool("verbose", false, "Enable verbose logging")
+		allPhases    = flag.Bool("a", false, "Run all phases including CT, AlterX, RDAP, and persistence")
+		allPhasesLong = flag.Bool("all", false, "Run all phases including CT, AlterX, RDAP, and persistence")
+		geoAnalysis  = flag.Bool("g", false, "Enable geographic DNS analysis")
+		geoLong      = flag.Bool("geo", false, "Enable geographic DNS analysis")
+		verbose      = flag.Bool("v", false, "Enable verbose logging")
+		verboseLong  = flag.Bool("verbose", false, "Enable verbose logging")
 	)
 	flag.Parse()
+
+	// Merge short and long flag values (long takes precedence if both are set)
+	targetDomain := *domain
+	if *domainLong != "" {
+		targetDomain = *domainLong
+	}
+	
+	targetConfig := *configPath
+	if *configLong != "" {
+		targetConfig = *configLong
+	}
+	
+	targetOutput := *output
+	if *outputLong != "" {
+		targetOutput = *outputLong
+	}
+	
+	targetFormat := *format
+	if *formatLong != "" {
+		targetFormat = *formatLong
+	}
+	
+	targetInteractive := *interactive || *interactiveLong
+	targetStats := *showStats || *showStatsLong
+	targetAllPhases := *allPhases || *allPhasesLong
+	targetGeoAnalysis := *geoAnalysis || *geoLong
+	targetVerbose := *verbose || *verboseLong
 
 	// Handle config creation
 	if *createConfig {
@@ -263,32 +303,32 @@ func main() {
 	}
 
 	// Handle statistics display
-	if *showStats && *domain != "" {
-		cfg, _ := config.Load(*configPath)
+	if targetStats && targetDomain != "" {
+		cfg, _ := config.Load(targetConfig)
 		tracker := persistence.New(cfg)
-		stats, err := tracker.GetDomainStats(*domain)
+		stats, err := tracker.GetDomainStats(targetDomain)
 		if err != nil {
 			log.Fatalf("Failed to get domain stats: %v", err)
 		}
-		fmt.Printf("Domain History for %s:\n", *domain)
+		fmt.Printf("Domain History for %s:\n", targetDomain)
 		fmt.Printf("Total domains tracked: %d\n", len(stats.Domains))
 		fmt.Printf("Last updated: %s\n", stats.LastUpdated.Format("2006-01-02 15:04:05"))
 		os.Exit(0)
 	}
 
 	// Handle new domains display
-	if *showNew != "" && *domain != "" {
-		cfg, _ := config.Load(*configPath)
+	if *showNew != "" && targetDomain != "" {
+		cfg, _ := config.Load(targetConfig)
 		tracker := persistence.New(cfg)
 		since, err := time.Parse("2006-01-02", *showNew)
 		if err != nil {
 			log.Fatalf("Invalid date format. Use YYYY-MM-DD: %v", err)
 		}
-		newDomains, err := tracker.GetNewDomains(*domain, since)
+		newDomains, err := tracker.GetNewDomains(targetDomain, since)
 		if err != nil {
 			log.Fatalf("Failed to get new domains: %v", err)
 		}
-		fmt.Printf("New domains for %s since %s:\n", *domain, *showNew)
+		fmt.Printf("New domains for %s since %s:\n", targetDomain, *showNew)
 		for _, domain := range newDomains {
 			fmt.Printf("  %s (first seen: %s, sources: %v)\n", 
 				domain.Domain, 
@@ -298,30 +338,33 @@ func main() {
 		os.Exit(0)
 	}
 
-	if *domain == "" {
-		fmt.Println("Usage: subscope -domain example.com")
-		fmt.Println("       subscope -domain example.com -all (run all phases)")
-		fmt.Println("       subscope -domain example.com -stats")
-		fmt.Println("       subscope -domain example.com -new-since 2024-01-01")
+	if targetDomain == "" {
+		fmt.Println("Usage: subscope -d example.com")
+		fmt.Println("       subscope --domain example.com")
+		fmt.Println("       subscope -d example.com -a (run all phases)")
+		fmt.Println("       subscope -d example.com -g (geographic DNS analysis)")
+		fmt.Println("       subscope -d example.com -s (show statistics)")
+		fmt.Println("       subscope -d example.com --new-since 2024-01-01")
 		fmt.Println("\nDefault phases: Wildcard detection, Passive enumeration, HTTP analysis, RDNS")
-		fmt.Println("All phases (-all): Adds Certificate Transparency, AlterX, RDAP, and persistence tracking")
+		fmt.Println("All phases (-a/--all): Adds Certificate Transparency, AlterX, RDAP, and persistence tracking")
+		fmt.Println("Geographic DNS (-g/--geo): Queries from multiple global regions for geo-specific subdomains")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
 
 	// Load configuration
-	cfg, err := config.Load(*configPath)
+	cfg, err := config.Load(targetConfig)
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 	
 	// Override config with command line flags
-	cfg.Target.Domain = *domain
-	cfg.Output.Format = *format
-	cfg.Output.File = *output
-	cfg.Verbose = *verbose
+	cfg.Target.Domain = targetDomain
+	cfg.Output.Format = targetFormat
+	cfg.Output.File = targetOutput
+	cfg.Verbose = targetVerbose
 
-	if *interactive {
+	if targetInteractive {
 		fmt.Println("Interactive TUI mode not yet implemented")
 		os.Exit(1)
 	}
@@ -329,7 +372,7 @@ func main() {
 	subscope := NewSubScope(cfg)
 	
 	ctx := context.Background()
-	if err := subscope.Run(ctx, *domain, *allPhases); err != nil {
+	if err := subscope.Run(ctx, targetDomain, targetAllPhases, targetGeoAnalysis); err != nil {
 		log.Fatalf("Enumeration failed: %v", err)
 	}
 
