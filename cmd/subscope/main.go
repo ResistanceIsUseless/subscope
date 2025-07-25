@@ -18,6 +18,7 @@ import (
 	"github.com/resistanceisuseless/subscope/internal/http"
 	"github.com/resistanceisuseless/subscope/internal/output"
 	"github.com/resistanceisuseless/subscope/internal/persistence"
+	"github.com/resistanceisuseless/subscope/internal/progress"
 	"github.com/resistanceisuseless/subscope/internal/rdns"
 	"github.com/resistanceisuseless/subscope/internal/shuffledns"
 	"github.com/resistanceisuseless/subscope/internal/summary"
@@ -34,38 +35,47 @@ func NewSubScope(cfg *config.Config) *SubScope {
 	}
 }
 
-func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAnalysis bool, inputDomainsPath string, mergeMode bool) error {
-	fmt.Printf("Starting SubScope enumeration for domain: %s\n", domain)
+func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAnalysis bool, inputDomainsPath string, mergeMode bool, enableProgress bool) error {
+	// Initialize progress tracker (disabled in verbose mode to avoid conflicts)
+	progressTracker := progress.New(enableProgress && !s.config.Verbose)
+	
+	progressTracker.Info("Starting SubScope enumeration for domain: %s", domain)
 	
 	enumerator := enumeration.New(s.config)
 	
 	// Phase 0: Wildcard detection
-	fmt.Println("Phase 0: Wildcard detection...")
+	progressTracker.StartPhase("Wildcard detection", 1)
 	wildcardDetector := wildcard.New(s.config)
 	if err := wildcardDetector.DetectWildcards(ctx, domain); err != nil {
-		fmt.Printf("Warning: Wildcard detection failed: %v\n", err)
+		progressTracker.Info("Warning: Wildcard detection failed: %v", err)
 	}
+	progressTracker.Complete()
 	
 	// Phase 0.5: Load input domains (if provided)
 	var inputDomainList []string
+	var err error
 	if inputDomainsPath != "" {
+		progressTracker.StartPhase("Loading input domains", 1)
 		inputDomainList, err = enumerator.LoadInputDomains(inputDomainsPath)
 		if err != nil {
 			return fmt.Errorf("failed to load input domains: %w", err)
 		}
+		progressTracker.Complete()
 	}
 	
 	// Phase 1: Passive enumeration
-	fmt.Println("Phase 1: Passive enumeration...")
+	progressTracker.StartPhase("Passive enumeration", 0) // Unknown total
 	domains, err := enumerator.RunPassiveEnumeration(ctx, domain)
 	if err != nil {
 		return fmt.Errorf("passive enumeration failed: %w", err)
 	}
+	progressTracker.Update(len(domains))
+	progressTracker.Complete()
 	
 	// Merge input domains with discovered domains if merge flag is set
 	if len(inputDomainList) > 0 {
 		if mergeMode {
-			fmt.Printf("Merging %d input domains with %d discovered domains\n", len(inputDomainList), len(domains))
+			progressTracker.Info("Merging %d input domains with %d discovered domains", len(inputDomainList), len(domains))
 			// Create a map to avoid duplicates
 			domainMap := make(map[string]bool)
 			for _, d := range domains {
@@ -77,10 +87,10 @@ func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAn
 					domainMap[d] = true
 				}
 			}
-			fmt.Printf("Total unique domains after merge: %d\n", len(domains))
+			progressTracker.Info("Total unique domains after merge: %d", len(domains))
 		} else {
 			// Replace discovered domains with input domains
-			fmt.Printf("Using %d input domains instead of discovered domains\n", len(inputDomainList))
+			progressTracker.Info("Using %d input domains instead of discovered domains", len(inputDomainList))
 			domains = inputDomainList
 		}
 	}
@@ -98,22 +108,22 @@ func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAn
 	}
 	
 	// Phase 1.1: Zone transfer attempt (early in the process)
-	fmt.Println("Phase 1.1: Zone transfer (AXFR) attempt...")
+	progressTracker.StartPhase("Zone transfer (AXFR)", 1)
 	resolver := dns.New(s.config)
 	zoneTransferDomains, err := resolver.AttemptZoneTransfer(ctx, domain)
 	if err != nil {
 		if s.config.Verbose {
-			fmt.Printf("Zone transfer attempt failed: %v\n", err)
+			progressTracker.Info("Zone transfer attempt failed: %v", err)
 		}
 	} else if len(zoneTransferDomains) > 0 {
 		// Add zone transfer domains to results
 		zoneResults := enumerator.ProcessZoneTransferDomains(zoneTransferDomains)
 		results = append(results, zoneResults...)
-		fmt.Printf("Zone transfer found %d domains\n", len(zoneTransferDomains))
+		progressTracker.Info("Zone transfer found %d domains", len(zoneTransferDomains))
 	}
+	progressTracker.Complete()
 	
 	// Phase 1.7: HTTP/HTTPS analysis with httpx (headers, SSL certs, redirects)
-	fmt.Println("Phase 1.7: HTTP/HTTPS analysis with httpx...")
 	httpAnalyzer := http.New(s.config)
 	// Analyze up to 500 domains to find additional subdomains via HTTP headers, SSL certs, and redirects
 	sampleSize := len(domains)
@@ -122,15 +132,17 @@ func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAn
 	}
 	var httpDomains []string
 	if sampleSize > 0 {
+		progressTracker.StartPhase("HTTP/HTTPS analysis", sampleSize)
 		httpDomains, err = httpAnalyzer.AnalyzeDomains(ctx, domains[:sampleSize], domain)
 		if err != nil {
-			fmt.Printf("Warning: httpx analysis failed: %v\n", err)
+			progressTracker.Info("Warning: httpx analysis failed: %v", err)
 		} else if len(httpDomains) > 0 {
 			// Add HTTP-discovered domains to results
 			httpResults := enumerator.ProcessHTTPDomains(httpDomains)
 			results = append(results, httpResults...)
-			fmt.Printf("Added %d httpx-discovered domains to enumeration results\n", len(httpDomains))
+			progressTracker.Info("Added %d httpx-discovered domains to enumeration results", len(httpDomains))
 		}
+		progressTracker.Complete()
 	}
 
 	// Optional phases (run only with --all flag)
@@ -167,13 +179,13 @@ func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAn
 	}
 
 	// Phase 2: DNS resolution
-	fmt.Println("Phase 2: DNS resolution...")
+	progressTracker.StartPhase("DNS resolution", len(results))
 	
 	// Try to use shuffledns for faster resolution
 	if _, err := exec.LookPath("shuffledns"); err == nil {
 		shuffleResolver := shuffledns.New(s.config)
 		if resolvedResults, err := shuffleResolver.ResolveDomains(ctx, results); err != nil {
-			fmt.Printf("Warning: shuffledns failed, falling back to built-in resolver: %v\n", err)
+			progressTracker.Info("Warning: shuffledns failed, falling back to built-in resolver: %v", err)
 			results = resolver.ResolveDomains(ctx, results)
 		} else {
 			// Use built-in resolver to get IP addresses for resolved domains
@@ -183,6 +195,7 @@ func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAn
 		// Fall back to built-in resolver
 		results = resolver.ResolveDomains(ctx, results)
 	}
+	progressTracker.Complete()
 	
 	// Phase 2.5: RDNS analysis on resolved IPs
 	fmt.Println("Phase 2.5: RDNS analysis...")
@@ -304,6 +317,8 @@ func main() {
 		geoLong      = flag.Bool("geo", false, "Enable geographic DNS analysis")
 		inputDomains = flag.String("input-domains", "", "Path to file containing additional domains to scan")
 		mergeDomains = flag.Bool("merge", false, "Merge input domains with discovered domains")
+		showProgress = flag.Bool("progress", false, "Show progress indicators")
+		profile      = flag.String("profile", "", "Rate limit profile (stealth, normal, aggressive)")
 		verbose      = flag.Bool("v", false, "Enable verbose logging")
 		verboseLong  = flag.Bool("verbose", false, "Enable verbose logging")
 	)
@@ -394,6 +409,8 @@ func main() {
 		fmt.Println("Geographic DNS (-g/--geo): Queries from multiple global regions for geo-specific subdomains")
 		fmt.Println("Input domains (--input-domains): Load additional domains from file")
 		fmt.Println("Merge mode (--merge): Merge input domains with discovered domains (default: replace)")
+		fmt.Println("Progress (--progress): Show progress indicators for long-running operations")
+		fmt.Println("Profile (--profile): Apply rate limit profile (stealth, normal, aggressive)")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
@@ -402,6 +419,15 @@ func main() {
 	cfg, err := config.Load(targetConfig)
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
+	}
+	
+	// Apply profile if specified
+	if *profile != "" {
+		cfg, err = config.LoadProfile(*profile, cfg)
+		if err != nil {
+			log.Fatalf("Failed to load profile: %v", err)
+		}
+		fmt.Printf("Applied profile: %s\n", *profile)
 	}
 	
 	// Override config with command line flags
@@ -418,7 +444,7 @@ func main() {
 	subscope := NewSubScope(cfg)
 	
 	ctx := context.Background()
-	if err := subscope.Run(ctx, targetDomain, targetAllPhases, targetGeoAnalysis, *inputDomains, *mergeDomains); err != nil {
+	if err := subscope.Run(ctx, targetDomain, targetAllPhases, targetGeoAnalysis, *inputDomains, *mergeDomains, *showProgress); err != nil {
 		log.Fatalf("Enumeration failed: %v", err)
 	}
 

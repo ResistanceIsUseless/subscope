@@ -101,3 +101,50 @@ output:
 	fmt.Printf("Default configuration created at: %s\n", configPath)
 	return nil
 }
+
+// LoadProfile loads a rate limit profile and merges it with the base config
+func LoadProfile(profileName string, baseConfig *Config) (*Config, error) {
+	if profileName == "" {
+		return baseConfig, nil
+	}
+	
+	// Try to find profile in profiles directory
+	profilePath := fmt.Sprintf("profiles/%s.yaml", profileName)
+	
+	// Check if profile exists
+	if _, err := os.Stat(profilePath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("profile '%s' not found at %s", profileName, profilePath)
+	}
+	
+	// Load profile config
+	profileConfig, err := Load(profilePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load profile '%s': %w", profileName, err)
+	}
+	
+	// Merge profile settings into base config
+	mergedConfig := *baseConfig // Copy base config
+	
+	// Override rate limit settings
+	if profileConfig.RateLimit.Global > 0 {
+		mergedConfig.RateLimit.Global = profileConfig.RateLimit.Global
+	}
+	if profileConfig.RateLimit.Jitter != baseConfig.RateLimit.Jitter {
+		mergedConfig.RateLimit.Jitter = profileConfig.RateLimit.Jitter
+	}
+	
+	// Override stealth settings
+	if profileConfig.Stealth.RandomDelay > 0 {
+		mergedConfig.Stealth.RandomDelay = profileConfig.Stealth.RandomDelay
+	}
+	if len(profileConfig.Stealth.UserAgents) > 0 {
+		mergedConfig.Stealth.UserAgents = profileConfig.Stealth.UserAgents
+	}
+	
+	// Override AlterX settings if present
+	if profileConfig.AlterX.MaxPermutations > 0 {
+		mergedConfig.AlterX.MaxPermutations = profileConfig.AlterX.MaxPermutations
+	}
+	
+	return &mergedConfig, nil
+}

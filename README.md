@@ -12,7 +12,10 @@ SubScope is an enterprise-grade subdomain enumeration tool that combines multipl
 - **Cloud Infrastructure Mapping**: Identifies AWS, Azure, GCP, and CDN services automatically
 - **Domain Persistence**: Track new domains across scans with built-in history
 - **Stealth Capabilities**: User-agent rotation, request jitter, and rate limiting
-- **Multiple Output Formats**: JSON, CSV, massdns, and dnsx formats for tool chaining
+- **Multiple Output Formats**: JSON, CSV, massdns, dnsx, Aquatone, and EyeWitness formats for tool chaining
+- **Input Domain Support**: Load domains from files for iterative scanning workflows
+- **Progress Indicators**: Real-time progress bars for long-running operations
+- **Rate Limit Profiles**: Stealth, normal, and aggressive scanning modes
 - **Go Install Support**: Easy installation and distribution
 
 ## Installation
@@ -83,6 +86,8 @@ subscope --domain example.com --geo
 #### Input/Output Options
 - `--input-domains`: Path to file containing additional domains to scan
 - `--merge`: Merge input domains with discovered domains (default: replace)
+- `--progress`: Show progress indicators for long-running operations
+- `--profile`: Apply rate limit profile (stealth, normal, aggressive)
 
 #### Information
 - `-s, --stats`: Show domain history statistics
@@ -134,6 +139,31 @@ subscope -d example.com -g -v
 
 # Combined with custom output format
 subscope -d example.com -g -f csv -o geo-results.csv
+```
+
+### Progress Indicators
+```bash
+# Show progress bars for long-running operations
+subscope -d example.com --progress
+
+# Works with all modes
+subscope -d example.com -a --progress  # All phases with progress
+subscope -d example.com -g --progress  # Geographic analysis with progress
+```
+
+### Rate Limit Profiles
+```bash
+# Stealth mode - minimal footprint (5 req/sec, delays, jitter)
+subscope -d example.com --profile stealth
+
+# Normal mode - balanced performance (20 req/sec)
+subscope -d example.com --profile normal
+
+# Aggressive mode - maximum speed (100 req/sec, no delays)
+subscope -d example.com --profile aggressive
+
+# Combine with other options
+subscope -d example.com --profile stealth -g --progress
 ```
 
 ### Configuration
@@ -367,6 +397,34 @@ subscope --domain example.com --all
 - **Geo-blocked Content**: Discovers region-restricted subdomains
 - **CDN Intelligence**: Maps global CDN distribution patterns
 - **Security Testing**: Identifies region-specific attack surfaces
+
+### Rate Limit Profiles
+
+SubScope includes three built-in rate limit profiles to balance speed and stealth:
+
+#### Stealth Profile (`--profile stealth`)
+- **Rate**: 5 requests/second with jitter
+- **Delays**: 1-3 second random delays between requests
+- **Use Case**: Sensitive targets, avoid detection
+- **Features**: User-agent rotation, request jitter, conservative timeouts
+
+#### Normal Profile (`--profile normal`) 
+- **Rate**: 20 requests/second 
+- **Delays**: 100-500ms random delays
+- **Use Case**: Standard authorized testing
+- **Features**: Balanced performance and respect for target infrastructure
+
+#### Aggressive Profile (`--profile aggressive`)
+- **Rate**: 100 requests/second with burst capability
+- **Delays**: No artificial delays
+- **Use Case**: Internal testing, authorized high-speed scans
+- **Features**: Maximum concurrency, shorter timeouts
+
+```bash
+# Example usage
+subscope -d example.com --profile stealth --progress
+subscope -d example.com --profile aggressive -a
+```
 
 ### DNS Zone Transfer Detection
 

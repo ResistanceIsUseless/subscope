@@ -1,0 +1,31 @@
+# Normal profile - Balanced performance and respect
+rate_limit:
+  global: 20                # Moderate rate
+  jitter: false             # No jitter needed
+  per_source:
+    httpx: 10               # Standard HTTP analysis speed
+    shuffledns: 50          # Good DNS resolution speed
+    alterx: 5               # Moderate permutation generation
+
+stealth:
+  random_delay_ms: 100      # 100-500ms random delays
+  max_random_delay_ms: 500
+  user_agent_rotation: true
+  request_jitter: false
+
+# Standard concurrent operations
+concurrency:
+  max_workers: 10
+  dns_workers: 50
+
+# Standard timeouts
+timeouts:
+  dns_timeout: 5s
+  http_timeout: 10s
+  global_timeout: 20m
+
+# Standard limits
+limits:
+  max_domains: 5000
+  max_http_analysis: 500
+  max_permutations: 10000
