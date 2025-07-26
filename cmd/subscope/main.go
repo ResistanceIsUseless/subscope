@@ -149,32 +149,32 @@ func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAn
 	var ctDomains []string
 	if allPhases {
 		// Phase 1.5: Certificate Transparency log analysis
-		fmt.Println("Phase 1.5: Certificate Transparency log analysis...")
+		fmt.Fprintln(os.Stderr, "Phase 1.5: Certificate Transparency log analysis...")
 		ctAnalyzer := ct.New(s.config)
 		ctDomains, err = ctAnalyzer.QueryCertificates(ctx, domain)
 		if err != nil {
-			fmt.Printf("Warning: Certificate Transparency query failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Warning: Certificate Transparency query failed: %v\n", err)
 		} else if len(ctDomains) > 0 {
 			// Add CT domains to results
 			ctResults := enumerator.ProcessCTDomains(ctDomains)
 			results = append(results, ctResults...)
-			fmt.Printf("Added %d CT domains to enumeration results\n", len(ctDomains))
+			fmt.Fprintf(os.Stderr, "Added %d CT domains to enumeration results\n", len(ctDomains))
 		}
 
 		// Phase 1.6: Dynamic wordlist generation with AlterX (after HTTP to include new findings)
-		fmt.Println("Phase 1.6: Dynamic wordlist generation...")
+		fmt.Fprintln(os.Stderr, "Phase 1.6: Dynamic wordlist generation...")
 		alterxIntegration := alterx.New(s.config)
 		// Combine subfinder, CT, and HTTP domains for permutation
 		allDiscovered := append(domains, ctDomains...)
 		allDiscovered = append(allDiscovered, httpDomains...)
 		permutations, err := alterxIntegration.GenerateDynamicWordlist(ctx, allDiscovered)
 		if err != nil {
-			fmt.Printf("Warning: AlterX permutation failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Warning: AlterX permutation failed: %v\n", err)
 		} else if len(permutations) > 0 {
 			// Add permutations to results
 			permutationResults := enumerator.ProcessPermutations(permutations)
 			results = append(results, permutationResults...)
-			fmt.Printf("Added %d permutations to enumeration results\n", len(permutations))
+			fmt.Fprintf(os.Stderr, "Added %d permutations to enumeration results\n", len(permutations))
 		}
 	}
 
@@ -198,40 +198,40 @@ func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAn
 	progressTracker.Complete()
 	
 	// Phase 2.5: RDNS analysis on resolved IPs
-	fmt.Println("Phase 2.5: RDNS analysis...")
+	fmt.Fprintln(os.Stderr, "Phase 2.5: RDNS analysis...")
 	rdnsAnalyzer := rdns.New(s.config)
 	rdnsDomains, err := rdnsAnalyzer.AnalyzeIPs(ctx, results, domain)
 	if err != nil {
-		fmt.Printf("Warning: RDNS analysis failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Warning: RDNS analysis failed: %v\n", err)
 	} else if len(rdnsDomains) > 0 {
 		// Add RDNS-discovered domains to results
 		rdnsResults := enumerator.ProcessRDNSDomains(rdnsDomains)
 		results = append(results, rdnsResults...)
-		fmt.Printf("Added %d RDNS-discovered domains to enumeration results\n", len(rdnsDomains))
+		fmt.Fprintf(os.Stderr, "Added %d RDNS-discovered domains to enumeration results\n", len(rdnsDomains))
 	}
 	
 	// Phase 2.6: Enhanced RDNS - IP range scanning (similar to dnsrecon)
 	if allPhases {
-		fmt.Println("Phase 2.6: RDNS IP range scanning...")
+		fmt.Fprintln(os.Stderr, "Phase 2.6: RDNS IP range scanning...")
 		rdnsRangeDomains, err := rdnsAnalyzer.ScanIPRangesFromSubnets(ctx, results, domain)
 		if err != nil {
-			fmt.Printf("Warning: RDNS range scanning failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Warning: RDNS range scanning failed: %v\n", err)
 		} else if len(rdnsRangeDomains) > 0 {
 			// Add RDNS range-discovered domains to results
 			rdnsRangeResults := enumerator.ProcessRDNSRangeDomains(rdnsRangeDomains)
 			results = append(results, rdnsRangeResults...)
-			fmt.Printf("Added %d RDNS range-discovered domains to enumeration results\n", len(rdnsRangeDomains))
+			fmt.Fprintf(os.Stderr, "Added %d RDNS range-discovered domains to enumeration results\n", len(rdnsRangeDomains))
 		}
 		
 	}
 	
 	// Phase 2.8: Geographic DNS analysis (can run independently or with -all)
 	if allPhases || geoAnalysis {
-		fmt.Println("Phase 2.8: Geographic DNS analysis...")
+		fmt.Fprintln(os.Stderr, "Phase 2.8: Geographic DNS analysis...")
 		geoDNS := dns.NewGeoDNSResolver(s.config)
 		geoResults, err := geoDNS.QueryFromAllRegions(ctx, domain)
 		if err != nil {
-			fmt.Printf("Warning: Geographic DNS analysis failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Warning: Geographic DNS analysis failed: %v\n", err)
 		} else {
 			// Analyze geographic differences
 			analysis := geoDNS.AnalyzeGeographicDifferences(geoResults)
@@ -245,7 +245,7 @@ func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAn
 			if len(geoDomains) > 0 {
 				geoEnumResults := enumerator.ProcessGeoDNSDomains(geoDomains)
 				results = append(results, geoEnumResults...)
-				fmt.Printf("Added %d geographically-specific domains to enumeration results\n", len(geoDomains))
+				fmt.Fprintf(os.Stderr, "Added %d geographically-specific domains to enumeration results\n", len(geoDomains))
 			}
 			
 			// Print geographic analysis
@@ -256,33 +256,33 @@ func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAn
 	}
 	
 	// Phase 2.7: Wildcard filtering
-	fmt.Println("Phase 2.7: Wildcard filtering...")
+	fmt.Fprintln(os.Stderr, "Phase 2.7: Wildcard filtering...")
 	results = wildcardDetector.FilterWildcardResults(results, domain)
 	
 	// Optional phases (run only with --all flag)
 	var orgData []arin.OrganizationInfo
 	if allPhases {
 		// Phase 2.8: Organization data from RDAP (ARIN, RIPE, etc.)
-		fmt.Println("Phase 2.8: Organization analysis via RDAP...")
+		fmt.Fprintln(os.Stderr, "Phase 2.8: Organization analysis via RDAP...")
 		arinAnalyzer := arin.New(s.config)
 		orgData, err = arinAnalyzer.AnalyzeIPs(ctx, results)
 		if err != nil {
-			fmt.Printf("Warning: RDAP analysis failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Warning: RDAP analysis failed: %v\n", err)
 		} else if len(orgData) > 0 {
-			fmt.Printf("Retrieved organization data for %d IP addresses\n", len(orgData))
+			fmt.Fprintf(os.Stderr, "Retrieved organization data for %d IP addresses\n", len(orgData))
 		}
 		
 		// Phase 2.9: Domain tracking and new domain flagging
-		fmt.Println("Phase 2.9: Domain history tracking...")
+		fmt.Fprintln(os.Stderr, "Phase 2.9: Domain history tracking...")
 		tracker := persistence.New(s.config)
 		results, err = tracker.TrackDomains(domain, results)
 		if err != nil {
-			fmt.Printf("Warning: Domain tracking failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Warning: Domain tracking failed: %v\n", err)
 		}
 	}
 	
 	// Phase 3: Output results
-	fmt.Println("Phase 3: Output results...")
+	fmt.Fprintln(os.Stderr, "Phase 3: Output results...")
 	writer := output.New(s.config)
 	if err := writer.WriteResults(results); err != nil {
 		return fmt.Errorf("failed to write results: %w", err)
@@ -367,9 +367,9 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to get domain stats: %v", err)
 		}
-		fmt.Printf("Domain History for %s:\n", targetDomain)
-		fmt.Printf("Total domains tracked: %d\n", len(stats.Domains))
-		fmt.Printf("Last updated: %s\n", stats.LastUpdated.Format("2006-01-02 15:04:05"))
+		fmt.Fprintf(os.Stderr, "Domain History for %s:\n", targetDomain)
+		fmt.Fprintf(os.Stderr, "Total domains tracked: %d\n", len(stats.Domains))
+		fmt.Fprintf(os.Stderr, "Last updated: %s\n", stats.LastUpdated.Format("2006-01-02 15:04:05"))
 		os.Exit(0)
 	}
 
@@ -385,9 +385,9 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to get new domains: %v", err)
 		}
-		fmt.Printf("New domains for %s since %s:\n", targetDomain, *showNew)
+		fmt.Fprintf(os.Stderr, "New domains for %s since %s:\n", targetDomain, *showNew)
 		for _, domain := range newDomains {
-			fmt.Printf("  %s (first seen: %s, sources: %v)\n", 
+			fmt.Fprintf(os.Stderr, "  %s (first seen: %s, sources: %v)\n", 
 				domain.Domain, 
 				domain.FirstSeen.Format("2006-01-02 15:04:05"),
 				domain.Sources)
@@ -427,7 +427,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to load profile: %v", err)
 		}
-		fmt.Printf("Applied profile: %s\n", *profile)
+		fmt.Fprintf(os.Stderr, "Applied profile: %s\n", *profile)
 	}
 	
 	// Override config with command line flags
@@ -437,7 +437,7 @@ func main() {
 	cfg.Verbose = targetVerbose
 
 	if targetInteractive {
-		fmt.Println("Interactive TUI mode not yet implemented")
+		fmt.Fprintln(os.Stderr, "Interactive TUI mode not yet implemented")
 		os.Exit(1)
 	}
 
@@ -448,5 +448,5 @@ func main() {
 		log.Fatalf("Enumeration failed: %v", err)
 	}
 
-	fmt.Println("Enumeration completed successfully")
+	fmt.Fprintln(os.Stderr, "Enumeration completed successfully")
 }

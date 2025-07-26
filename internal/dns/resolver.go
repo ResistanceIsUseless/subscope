@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -82,7 +83,7 @@ func New(config *config.Config) *Resolver {
 }
 
 func (r *Resolver) ResolveDomains(ctx context.Context, results []enumeration.DomainResult) []enumeration.DomainResult {
-	fmt.Printf("Starting DNS resolution for %d domains (rate limit: %d/sec, %d DNS servers)...\n", 
+	fmt.Fprintf(os.Stderr, "Starting DNS resolution for %d domains (rate limit: %d/sec, %d DNS servers)...\n", 
 		len(results), r.config.RateLimit.Global, len(r.resolvers))
 		
 	jobs := make(chan enumeration.DomainResult, len(results))
@@ -130,17 +131,17 @@ func (r *Resolver) ResolveDomains(ctx context.Context, results []enumeration.Dom
 			progressInterval = 100
 		}
 		if len(resolvedResults)%progressInterval == 0 && len(resolvedResults) > 0 {
-			fmt.Printf("Processed %d/%d domains (%d resolved)\n", 
+			fmt.Fprintf(os.Stderr, "Processed %d/%d domains (%d resolved)\n", 
 				len(resolvedResults), len(results), resolvedCount)
 		}
 	}
 	
 	if r.config.Verbose {
-		fmt.Printf("DNS resolution completed: %d/%d domains resolved\n", 
+		fmt.Fprintf(os.Stderr, "DNS resolution completed: %d/%d domains resolved\n", 
 			resolvedCount, len(results))
 	} else {
 		// Only show resolved count in non-verbose mode
-		fmt.Printf("DNS resolution completed: %d domains resolved\n", resolvedCount)
+		fmt.Fprintf(os.Stderr, "DNS resolution completed: %d domains resolved\n", resolvedCount)
 	}
 
 	return resolvedResults
@@ -472,7 +473,7 @@ func (r *Resolver) detectCloudDNS(ns string) string {
 
 // AttemptZoneTransfer attempts an AXFR zone transfer for the given domain
 func (r *Resolver) AttemptZoneTransfer(ctx context.Context, domain string) ([]string, error) {
-	fmt.Printf("Attempting zone transfer (AXFR) for %s...\n", domain)
+	fmt.Fprintf(os.Stderr, "Attempting zone transfer (AXFR) for %s...\n", domain)
 	
 	// First, get the name servers for the domain
 	nameServers, err := r.getNameServers(ctx, domain)
@@ -481,11 +482,11 @@ func (r *Resolver) AttemptZoneTransfer(ctx context.Context, domain string) ([]st
 	}
 	
 	if len(nameServers) == 0 {
-		fmt.Printf("No name servers found for %s\n", domain)
+		fmt.Fprintf(os.Stderr, "No name servers found for %s\n", domain)
 		return []string{}, nil
 	}
 	
-	fmt.Printf("Found %d name servers for %s\n", len(nameServers), domain)
+	fmt.Fprintf(os.Stderr, "Found %d name servers for %s\n", len(nameServers), domain)
 	
 	var allDomains []string
 	domainSet := make(map[string]bool)
@@ -520,7 +521,7 @@ func (r *Resolver) AttemptZoneTransfer(ctx context.Context, domain string) ([]st
 	}
 	
 	if len(allDomains) == 0 {
-		fmt.Printf("Zone transfer not allowed or no records found for %s\n", domain)
+		fmt.Fprintf(os.Stderr, "Zone transfer not allowed or no records found for %s\n", domain)
 	} else {
 		fmt.Printf("Zone transfer completed - found %d unique domains\n", len(allDomains))
 	}

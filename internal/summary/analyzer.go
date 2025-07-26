@@ -2,6 +2,7 @@ package summary
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -129,89 +130,89 @@ func detectCloudProvider(organization string) string {
 }
 
 func (s *Summary) Print() {
-	fmt.Println("\n" + strings.Repeat("=", 60))
-	fmt.Println("                    ENUMERATION SUMMARY")
-	fmt.Println(strings.Repeat("=", 60))
+	fmt.Fprintln(os.Stderr, "\n" + strings.Repeat("=", 60))
+	fmt.Fprintln(os.Stderr, "                    ENUMERATION SUMMARY")
+	fmt.Fprintln(os.Stderr, strings.Repeat("=", 60))
 	
 	// Domain statistics
-	fmt.Printf("\n📊 Domain Statistics:\n")
-	fmt.Printf("   Total Domains Found: %d\n", s.TotalDomains)
-	fmt.Printf("   Successfully Resolved: %d (%.1f%%)\n", 
+	fmt.Fprintf(os.Stderr, "\n📊 Domain Statistics:\n")
+	fmt.Fprintf(os.Stderr, "   Total Domains Found: %d\n", s.TotalDomains)
+	fmt.Fprintf(os.Stderr, "   Successfully Resolved: %d (%.1f%%)\n", 
 		s.ResolvedDomains, 
 		float64(s.ResolvedDomains)/float64(s.TotalDomains)*100)
 	if s.FailedDomains > 0 {
-		fmt.Printf("   Failed Resolution: %d\n", s.FailedDomains)
+		fmt.Fprintf(os.Stderr, "   Failed Resolution: %d\n", s.FailedDomains)
 	}
 	if s.NewDomains > 0 {
-		fmt.Printf("   🆕 New Domains: %d\n", s.NewDomains)
+		fmt.Fprintf(os.Stderr, "   🆕 New Domains: %d\n", s.NewDomains)
 	}
 	if s.WildcardFiltered > 0 {
-		fmt.Printf("   Wildcard Filtered: %d\n", s.WildcardFiltered)
+		fmt.Fprintf(os.Stderr, "   Wildcard Filtered: %d\n", s.WildcardFiltered)
 	}
 	
 	// Discovery sources
-	fmt.Printf("\n🔍 Discovery Sources:\n")
+	fmt.Fprintf(os.Stderr, "\n🔍 Discovery Sources:\n")
 	sources := sortMapByValue(s.Sources)
 	for _, kv := range sources {
-		fmt.Printf("   %-25s: %d domains\n", kv.Key, kv.Value)
+		fmt.Fprintf(os.Stderr, "   %-25s: %d domains\n", kv.Key, kv.Value)
 	}
 	
 	// Cloud services (from DNS analysis)
 	if len(s.CloudServices) > 0 {
-		fmt.Printf("\n☁️  Cloud Services (via DNS):\n")
+		fmt.Fprintf(os.Stderr, "\n☁️  Cloud Services (via DNS):\n")
 		services := sortMapByValue(s.CloudServices)
 		for _, kv := range services {
-			fmt.Printf("   %-25s: %d domains\n", kv.Key, kv.Value)
+			fmt.Fprintf(os.Stderr, "   %-25s: %d domains\n", kv.Key, kv.Value)
 		}
-		fmt.Printf("   Total cloud-hosted domains: %d (%.1f%%)\n", 
+		fmt.Fprintf(os.Stderr, "   Total cloud-hosted domains: %d (%.1f%%)\n", 
 			s.CloudHostingCount, 
 			float64(s.CloudHostingCount)/float64(s.ResolvedDomains)*100)
 	}
 	
 	// Cloud DNS providers
 	if len(s.CloudDNS) > 0 {
-		fmt.Printf("\n🌐 DNS Providers:\n")
+		fmt.Fprintf(os.Stderr, "\n🌐 DNS Providers:\n")
 		dnsProviders := sortMapByValue(s.CloudDNS)
 		for _, kv := range dnsProviders {
-			fmt.Printf("   %-25s: detected\n", kv.Key)
+			fmt.Fprintf(os.Stderr, "   %-25s: detected\n", kv.Key)
 		}
 	}
 	
 	// Cloud providers (from IP analysis)
 	if len(s.CloudProviders) > 0 {
-		fmt.Printf("\n☁️  Cloud Providers (via IP):\n")
+		fmt.Fprintf(os.Stderr, "\n☁️  Cloud Providers (via IP):\n")
 		providers := sortMapByValue(s.CloudProviders)
 		for _, kv := range providers {
-			fmt.Printf("   %-25s: %d IPs\n", kv.Key, kv.Value)
+			fmt.Fprintf(os.Stderr, "   %-25s: %d IPs\n", kv.Key, kv.Value)
 		}
 	}
 	
 	// Top organizations
 	if len(s.Organizations) > 0 {
-		fmt.Printf("\n🏢 Top Organizations:\n")
+		fmt.Fprintf(os.Stderr, "\n🏢 Top Organizations:\n")
 		orgs := sortMapByValue(s.Organizations)
 		limit := 10
 		if len(orgs) < limit {
 			limit = len(orgs)
 		}
 		for i := 0; i < limit; i++ {
-			fmt.Printf("   %-25s: %d IPs\n", orgs[i].Key, orgs[i].Value)
+			fmt.Fprintf(os.Stderr, "   %-25s: %d IPs\n", orgs[i].Key, orgs[i].Value)
 		}
 		if len(orgs) > limit {
-			fmt.Printf("   ... and %d more organizations\n", len(orgs)-limit)
+			fmt.Fprintf(os.Stderr, "   ... and %d more organizations\n", len(orgs)-limit)
 		}
 	}
 	
 	// Countries
 	if len(s.Countries) > 0 {
-		fmt.Printf("\n🌍 Geographic Distribution:\n")
+		fmt.Fprintf(os.Stderr, "\n🌍 Geographic Distribution:\n")
 		countries := sortMapByValue(s.Countries)
 		for _, kv := range countries {
-			fmt.Printf("   %-25s: %d IPs\n", kv.Key, kv.Value)
+			fmt.Fprintf(os.Stderr, "   %-25s: %d IPs\n", kv.Key, kv.Value)
 		}
 	}
 	
-	fmt.Println("\n" + strings.Repeat("=", 60))
+	fmt.Fprintln(os.Stderr, "\n" + strings.Repeat("=", 60))
 }
 
 type KeyValue struct {

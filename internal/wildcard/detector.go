@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"os"
 	"strings"
 	"time"
 
@@ -34,7 +35,7 @@ func New(config *config.Config) *Detector {
 }
 
 func (w *Detector) DetectWildcards(ctx context.Context, targetDomain string) error {
-	fmt.Printf("Detecting wildcard DNS responses for %s...\n", targetDomain)
+	fmt.Fprintf(os.Stderr, "Detecting wildcard DNS responses for %s...\n", targetDomain)
 	
 	// Generate random subdomain names to test for wildcards
 	testSubdomains := w.generateTestSubdomains(targetDomain, 5)
@@ -64,7 +65,7 @@ func (w *Detector) DetectWildcards(ctx context.Context, targetDomain string) err
 		fmt.Printf("Wildcard DNS detected for %s: %d IPs (%v)\n", 
 			targetDomain, len(wildcardIPs), wildcardIPs)
 	} else {
-		fmt.Printf("No wildcard DNS detected for %s\n", targetDomain)
+		fmt.Fprintf(os.Stderr, "No wildcard DNS detected for %s\n", targetDomain)
 	}
 	
 	return nil

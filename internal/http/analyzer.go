@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -38,7 +39,7 @@ func New(config *config.Config) *Analyzer {
 }
 
 func (h *Analyzer) AnalyzeDomains(ctx context.Context, domains []string, targetDomain string) ([]string, error) {
-	fmt.Printf("Starting httpx analysis for %d domains...\n", len(domains))
+	fmt.Fprintf(os.Stderr, "Starting httpx analysis for %d domains...\n", len(domains))
 	
 	// Check if httpx is available
 	if _, err := exec.LookPath("httpx"); err != nil {
@@ -49,7 +50,7 @@ func (h *Analyzer) AnalyzeDomains(ctx context.Context, domains []string, targetD
 	analyzeCount := len(domains)
 	if analyzeCount > 500 {
 		analyzeCount = 500
-		fmt.Printf("Limiting httpx analysis to first %d domains\n", analyzeCount)
+		fmt.Fprintf(os.Stderr, "Limiting httpx analysis to first %d domains\n", analyzeCount)
 	}
 	
 	// Build httpx command
@@ -94,6 +95,9 @@ func (h *Analyzer) AnalyzeDomains(ctx context.Context, domains []string, targetD
 	go func() {
 		defer stdin.Close()
 		for i := 0; i < analyzeCount; i++ {
+			if h.config.Verbose {
+				fmt.Fprintf(os.Stderr, "  Testing HTTP/HTTPS: %s\n", domains[i])
+			}
 			fmt.Fprintf(stdin, "%s\n", domains[i])
 		}
 	}()
@@ -114,26 +118,37 @@ func (h *Analyzer) AnalyzeDomains(ctx context.Context, domains []string, targetD
 			continue // Skip malformed JSON
 		}
 		
+		if h.config.Verbose {
+			fmt.Fprintf(os.Stderr, "  HTTP response from %s (status: %d)\n", result.URL, result.StatusCode)
+		}
+		
 		// Extract domains from various sources
 		newDomains := h.extractDomainsFromHTTPX(result, targetDomain)
+		if h.config.Verbose && len(newDomains) > 0 {
+			fmt.Fprintf(os.Stderr, "    Found %d new domains from %s\n", len(newDomains), result.URL)
+		}
+		
 		for _, domain := range newDomains {
 			if !domainSet[domain] {
 				domainSet[domain] = true
 				discoveredDomains = append(discoveredDomains, domain)
+				if h.config.Verbose {
+					fmt.Fprintf(os.Stderr, "    New domain: %s\n", domain)
+				}
 			}
 		}
 	}
 	
 	// Wait for httpx to complete
 	if err := cmd.Wait(); err != nil {
-		fmt.Printf("Warning: httpx completed with error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Warning: httpx completed with error: %v\n", err)
 	}
 	
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("error reading httpx output: %w", err)
 	}
 	
-	fmt.Printf("httpx analysis found %d additional subdomains\n", len(discoveredDomains))
+	fmt.Fprintf(os.Stderr, "httpx analysis found %d additional subdomains\n", len(discoveredDomains))
 	return discoveredDomains, nil
 }
 

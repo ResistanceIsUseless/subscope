@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -60,7 +61,7 @@ func New(config *config.Config) *Analyzer {
 }
 
 func (r *Analyzer) AnalyzeIPs(ctx context.Context, results []enumeration.DomainResult, targetDomain string) ([]string, error) {
-	fmt.Printf("Starting RDNS analysis for resolved domains...\n")
+	fmt.Fprintf(os.Stderr, "Starting RDNS analysis for resolved domains...\n")
 	
 	// Extract unique IP addresses from resolved domains
 	ipSet := make(map[string]bool)
@@ -90,7 +91,7 @@ func (r *Analyzer) AnalyzeIPs(ctx context.Context, results []enumeration.DomainR
 		ips = append(ips, ip)
 	}
 	
-	fmt.Printf("Performing RDNS lookups on %d unique IP addresses...\n", len(ips))
+	fmt.Fprintf(os.Stderr, "Performing RDNS lookups on %d unique IP addresses...\n", len(ips))
 	
 	// Process IPs concurrently
 	jobs := make(chan string, len(ips))
@@ -133,10 +134,10 @@ func (r *Analyzer) AnalyzeIPs(ctx context.Context, results []enumeration.DomainR
 	}
 	
 	if r.config.Verbose {
-		fmt.Printf("RDNS analysis found %d hostnames (%d relevant to %s)\n", 
+		fmt.Fprintf(os.Stderr, "RDNS analysis found %d hostnames (%d relevant to %s)\n", 
 			totalHostnames, len(discoveredDomains), targetDomain)
 	} else if len(discoveredDomains) > 0 {
-		fmt.Printf("RDNS analysis found %d new subdomains from reverse lookups\n", len(discoveredDomains))
+		fmt.Fprintf(os.Stderr, "RDNS analysis found %d new subdomains from reverse lookups\n", len(discoveredDomains))
 	}
 	
 	return discoveredDomains, nil
@@ -227,7 +228,7 @@ func (r *Analyzer) isValidSubdomain(subdomain, targetDomain string) bool {
 
 // ScanIPRange performs reverse DNS lookups on an IP range (CIDR notation)
 func (r *Analyzer) ScanIPRange(ctx context.Context, cidr, targetDomain string) ([]string, error) {
-	fmt.Printf("Starting RDNS scan of IP range %s...\n", cidr)
+	fmt.Fprintf(os.Stderr, "Starting RDNS scan of IP range %s...\n", cidr)
 	
 	// Parse CIDR
 	_, ipNet, err := net.ParseCIDR(cidr)
@@ -407,7 +408,7 @@ func (r *Analyzer) ScanSpecificIPs(ctx context.Context, ipList []string, targetD
 		return []string{}, nil
 	}
 	
-	fmt.Printf("Starting RDNS scan of %d specific IP addresses...\n", len(ipList))
+	fmt.Fprintf(os.Stderr, "Starting RDNS scan of %d specific IP addresses...\n", len(ipList))
 	
 	// Process IPs concurrently
 	jobs := make(chan string, len(ipList))

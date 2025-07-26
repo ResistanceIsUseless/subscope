@@ -147,7 +147,7 @@ func (w *Writer) writeJSON(result EnumerationResult) error {
 		return fmt.Errorf("failed to encode JSON: %w", err)
 	}
 	
-	fmt.Printf("Results written to: %s\n", w.config.Output.File)
+	fmt.Fprintf(os.Stderr, "Results written to: %s\n", w.config.Output.File)
 	return nil
 }
 
@@ -200,7 +200,7 @@ func (w *Writer) writeCSV(result EnumerationResult) error {
 		}
 	}
 
-	fmt.Printf("CSV results written to: %s\n", w.config.Output.File)
+	fmt.Fprintf(os.Stderr, "CSV results written to: %s\n", w.config.Output.File)
 	return nil
 }
 
@@ -226,7 +226,7 @@ func (w *Writer) writeMassDNS(result EnumerationResult) error {
 		}
 	}
 
-	fmt.Printf("MassDNS format written to: %s (%d domains)\n", 
+	fmt.Fprintf(os.Stderr, "MassDNS format written to: %s (%d domains)\n", 
 		w.config.Output.File, count)
 	return nil
 }
@@ -253,7 +253,7 @@ func (w *Writer) writeDNSx(result EnumerationResult) error {
 		}
 	}
 
-	fmt.Printf("DNSx format written to: %s (%d domains)\n", 
+	fmt.Fprintf(os.Stderr, "DNSx format written to: %s (%d domains)\n", 
 		w.config.Output.File, count)
 	return nil
 }
@@ -281,7 +281,7 @@ func (w *Writer) writeAquatone(result EnumerationResult) error {
 		}
 	}
 
-	fmt.Printf("Aquatone format written to: %s (%d entries)\n", 
+	fmt.Fprintf(os.Stderr, "Aquatone format written to: %s (%d entries)\n", 
 		w.config.Output.File, count)
 	return nil
 }
@@ -305,7 +305,7 @@ func (w *Writer) writeEyeWitness(result EnumerationResult) error {
 		count += 2
 	}
 
-	fmt.Printf("EyeWitness format written to: %s (%d URLs)\n", 
+	fmt.Fprintf(os.Stderr, "EyeWitness format written to: %s (%d URLs)\n", 
 		w.config.Output.File, count)
 	return nil
 }

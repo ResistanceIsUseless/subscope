@@ -24,7 +24,7 @@ type Tracker struct {
 // New creates a new progress tracker
 func New(enabled bool) *Tracker {
 	return &Tracker{
-		writer:    os.Stdout,
+		writer:    os.Stderr,
 		startTime: time.Now(),
 		enabled:   enabled,
 	}
@@ -93,7 +93,7 @@ func (p *Tracker) Complete() {
 // Info prints an informational message without affecting progress
 func (p *Tracker) Info(format string, args ...interface{}) {
 	if !p.enabled {
-		fmt.Printf(format+"\n", args...)
+		fmt.Fprintf(os.Stderr, format+"\n", args...)
 		return
 	}
 	

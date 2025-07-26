@@ -72,7 +72,7 @@ func (r *Resolver) ResolveDomains(ctx context.Context, results []enumeration.Dom
 	defer os.Remove(outputFile.Name())
 	args = append(args, "-o", outputFile.Name())
 
-	fmt.Printf("Starting DNS resolution with shuffledns for %d domains...\n", len(results))
+	fmt.Fprintf(os.Stderr, "Starting DNS resolution with shuffledns for %d domains...\n", len(results))
 
 	// Run shuffledns
 	cmd := exec.CommandContext(ctx, "shuffledns", args...)
@@ -113,10 +113,10 @@ func (r *Resolver) ResolveDomains(ctx context.Context, results []enumeration.Dom
 	failedCount := len(results) - resolvedCount
 	
 	if r.config.Verbose {
-		fmt.Printf("DNS resolution completed: %d/%d domains resolved (%d failed)\n", resolvedCount, len(results), failedCount)
+		fmt.Fprintf(os.Stderr, "DNS resolution completed: %d/%d domains resolved (%d failed)\n", resolvedCount, len(results), failedCount)
 	} else {
 		// Only show resolved count in non-verbose mode
-		fmt.Printf("DNS resolution completed: %d domains resolved\n", resolvedCount)
+		fmt.Fprintf(os.Stderr, "DNS resolution completed: %d domains resolved\n", resolvedCount)
 	}
 
 	return results, nil
@@ -158,6 +158,6 @@ func (r *Resolver) createResolversFile() (string, error) {
 func (r *Resolver) ResolveDomainsFallback(ctx context.Context, results []enumeration.DomainResult) []enumeration.DomainResult {
 	// This would fall back to the original DNS resolver implementation
 	// For now, we'll just return an error message
-	fmt.Println("Warning: shuffledns not available, using built-in resolver (slower)")
+	fmt.Fprintln(os.Stderr, "Warning: shuffledns not available, using built-in resolver (slower)")
 	return results
 }

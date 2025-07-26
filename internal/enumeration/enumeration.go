@@ -33,7 +33,7 @@ func New(config *config.Config) *Enumerator {
 }
 
 func (e *Enumerator) RunPassiveEnumeration(ctx context.Context, domain string) ([]string, error) {
-	fmt.Printf("Running passive enumeration for domain: %s\n", domain)
+	fmt.Fprintf(os.Stderr, "Running passive enumeration for domain: %s\n", domain)
 	
 	// Check if subfinder is available
 	if _, err := exec.LookPath("subfinder"); err != nil {
@@ -95,7 +95,7 @@ func (e *Enumerator) RunPassiveEnumeration(ctx context.Context, domain string) (
 		return nil, fmt.Errorf("error reading subfinder output: %w", err)
 	}
 	
-	fmt.Printf("Passive enumeration completed. Found %d domains.\n", len(domains))
+	fmt.Fprintf(os.Stderr, "Passive enumeration completed. Found %d domains.\n", len(domains))
 	return domains, nil
 }
 
@@ -233,7 +233,7 @@ func (e *Enumerator) LoadInputDomains(path string) ([]string, error) {
 		return nil, nil
 	}
 	
-	fmt.Printf("Loading input domains from: %s\n", path)
+	fmt.Fprintf(os.Stderr, "Loading input domains from: %s\n", path)
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open input domains file: %w", err)
@@ -265,7 +265,7 @@ func (e *Enumerator) LoadInputDomains(path string) ([]string, error) {
 		return nil, fmt.Errorf("error reading input domains file: %w", err)
 	}
 	
-	fmt.Printf("Loaded %d valid domains from input file\n", len(domains))
+	fmt.Fprintf(os.Stderr, "Loaded %d valid domains from input file\n", len(domains))
 	return domains, nil
 }
 
