@@ -116,6 +116,90 @@ func (g *GeoDNSResolver) QueryFromAllRegions(ctx context.Context, domain string)
 	return results, nil
 }
 
+// QueryDomainsFromAllRegions queries multiple domains and returns enriched results with GeoDNS details
+func (g *GeoDNSResolver) QueryDomainsFromAllRegions(ctx context.Context, domains []string) ([]enumeration.DomainResult, error) {
+	// Map to track all results by domain
+	domainRegionMap := make(map[string]map[string]enumeration.RegionalDNSInfo)
+	allResults := make(map[string]*enumeration.DomainResult)
+	
+	for _, domain := range domains {
+		domainRegionMap[domain] = make(map[string]enumeration.RegionalDNSInfo)
+		
+		// Query from all regions
+		regionResults, err := g.QueryFromAllRegions(ctx, domain)
+		if err != nil {
+			continue
+		}
+		
+		// Process results from each region
+		for region, results := range regionResults {
+			for _, result := range results {
+				// Create or update the domain result
+				if _, exists := allResults[result.Domain]; !exists {
+					allResults[result.Domain] = &enumeration.DomainResult{
+						Domain:     result.Domain,
+						Status:     result.Status,
+						Source:     "geodns",
+						Timestamp:  result.Timestamp,
+						DNSRecords: make(map[string]string),
+						GeoDNS:     &enumeration.GeoDNSDetails{
+							RegionalRecords: make(map[string]enumeration.RegionalDNSInfo),
+						},
+					}
+				}
+				
+				// Collect regional DNS info
+				regionalInfo := enumeration.RegionalDNSInfo{}
+				
+				// Extract A records
+				if aRecord, exists := result.DNSRecords["A"]; exists {
+					regionalInfo.A = []string{aRecord}
+				}
+				
+				// Extract CNAME
+				if cname, exists := result.DNSRecords["CNAME"]; exists {
+					regionalInfo.CNAME = cname
+				}
+				
+				// Extract cloud service
+				if cloudService, exists := result.DNSRecords["CLOUD_SERVICE"]; exists {
+					regionalInfo.CloudService = cloudService
+				}
+				
+				// Store regional info
+				allResults[result.Domain].GeoDNS.RegionalRecords[region] = regionalInfo
+				domainRegionMap[result.Domain][region] = regionalInfo
+			}
+		}
+	}
+	
+	// Analyze which regions found each domain
+	for _, result := range allResults {
+		foundRegions := make([]string, 0)
+		missingRegions := make([]string, 0)
+		
+		for _, region := range g.regions {
+			if _, found := result.GeoDNS.RegionalRecords[region.Name]; found {
+				foundRegions = append(foundRegions, region.Name)
+			} else {
+				missingRegions = append(missingRegions, region.Name)
+			}
+		}
+		
+		result.GeoDNS.FoundInRegions = foundRegions
+		result.GeoDNS.MissingInRegions = missingRegions
+		result.GeoDNS.IsGeographic = len(missingRegions) > 0
+	}
+	
+	// Convert map to slice
+	var finalResults []enumeration.DomainResult
+	for _, result := range allResults {
+		finalResults = append(finalResults, *result)
+	}
+	
+	return finalResults, nil
+}
+
 // queryFromRegion performs DNS queries simulating requests from a specific region
 func (g *GeoDNSResolver) queryFromRegion(ctx context.Context, domain string, region GeoDNSRegion) ([]enumeration.DomainResult, error) {
 	var results []enumeration.DomainResult

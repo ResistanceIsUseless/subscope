@@ -24,6 +24,22 @@ type DomainResult struct {
 	DNSRecords map[string]string `json:"dns_records,omitempty"`
 	Source     string            `json:"source"`
 	Timestamp  time.Time         `json:"timestamp"`
+	GeoDNS     *GeoDNSDetails    `json:"geodns,omitempty"`
+}
+
+// GeoDNSDetails contains geographic DNS analysis information
+type GeoDNSDetails struct {
+	FoundInRegions   []string                   `json:"found_in_regions,omitempty"`
+	MissingInRegions []string                   `json:"missing_in_regions,omitempty"`
+	RegionalRecords  map[string]RegionalDNSInfo `json:"regional_records,omitempty"`
+	IsGeographic     bool                       `json:"is_geographic"`
+}
+
+// RegionalDNSInfo contains DNS records specific to a region
+type RegionalDNSInfo struct {
+	A            []string `json:"a,omitempty"`
+	CNAME        string   `json:"cname,omitempty"`
+	CloudService string   `json:"cloud_service,omitempty"`
 }
 
 func New(config *config.Config) *Enumerator {

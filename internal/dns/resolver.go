@@ -175,6 +175,11 @@ func (r *Resolver) resolveDomain(ctx context.Context, result enumeration.DomainR
 		time.Sleep(time.Duration(jitterMs) * time.Millisecond)
 	}
 	
+	// Check if this domain should use rotation detection (for domains with known load balancing)
+	if r.shouldUseRotationDetection(result.Domain) {
+		return r.resolveWithRotationDetection(ctx, result.Domain, resolverIndex)
+	}
+	
 	timeoutCtx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
 
@@ -210,11 +215,32 @@ func (r *Resolver) resolveDomain(ctx context.Context, result enumeration.DomainR
 		
 		// Store all IPs
 		var allIPs []string
+		var cloudRegions []string
 		for _, ip := range ips {
-			allIPs = append(allIPs, ip.IP.String())
+			ipStr := ip.IP.String()
+			allIPs = append(allIPs, ipStr)
+			
+			// Detect cloud region for each IP
+			if region := r.detectCloudRegion(ipStr); region != "" {
+				cloudRegions = append(cloudRegions, region)
+			}
 		}
 		if len(allIPs) > 1 {
 			result.DNSRecords["A_ALL"] = strings.Join(allIPs, ",")
+		}
+		
+		// Add cloud region information if detected
+		if len(cloudRegions) > 0 {
+			// Remove duplicates
+			regionSet := make(map[string]bool)
+			var uniqueRegions []string
+			for _, region := range cloudRegions {
+				if !regionSet[region] {
+					regionSet[region] = true
+					uniqueRegions = append(uniqueRegions, region)
+				}
+			}
+			result.DNSRecords["CLOUD_REGIONS"] = strings.Join(uniqueRegions, ",")
 		}
 		
 		// Collect additional DNS records (CNAME, SOA) using miekg/dns
@@ -224,6 +250,167 @@ func (r *Resolver) resolveDomain(ctx context.Context, result enumeration.DomainR
 	}
 
 	return result
+}
+
+// resolveWithRotationDetection performs multiple DNS queries to detect round-robin patterns
+func (r *Resolver) resolveWithRotationDetection(ctx context.Context, domain string, resolverIndex int) enumeration.DomainResult {
+	result := enumeration.DomainResult{
+		Domain:     domain,
+		Status:     "discovered",
+		Source:     "dns_resolution_lb", // Mark as load balancing detection
+		Timestamp:  time.Now(),
+		DNSRecords: make(map[string]string),
+	}
+	
+	// Create timeout context
+	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	
+	resolver := r.resolvers[resolverIndex]
+	allUniqueIPs := make(map[string]bool)
+	var allIPSets [][]string
+	
+	// Perform multiple queries to detect rotation
+	for i := 0; i < 5; i++ {
+		ips, err := resolver.LookupIPAddr(timeoutCtx, domain)
+		if err != nil {
+			if i == 0 {
+				// If first query fails, return failed result
+				result.Status = "failed"
+				return result
+			}
+			// Continue with other queries even if one fails
+			continue
+		}
+		
+		if len(ips) > 0 {
+			var currentSet []string
+			for _, ip := range ips {
+				ipStr := ip.IP.String()
+				currentSet = append(currentSet, ipStr)
+				allUniqueIPs[ipStr] = true
+			}
+			allIPSets = append(allIPSets, currentSet)
+		}
+		
+		// Small delay between queries
+		time.Sleep(100 * time.Millisecond)
+	}
+	
+	if len(allUniqueIPs) > 0 {
+		result.Status = "resolved"
+		
+		// Store all unique IPs found across queries
+		var uniqueIPs []string
+		var cloudRegions []string
+		for ip := range allUniqueIPs {
+			uniqueIPs = append(uniqueIPs, ip)
+			
+			// Detect cloud region for each IP
+			if region := r.detectCloudRegion(ip); region != "" {
+				cloudRegions = append(cloudRegions, region)
+			}
+		}
+		
+		// Use first IP as primary
+		result.DNSRecords["A"] = uniqueIPs[0]
+		
+		// Store all IPs
+		if len(uniqueIPs) > 1 {
+			result.DNSRecords["A_ALL"] = strings.Join(uniqueIPs, ",")
+		}
+		
+		// Add cloud region information if detected
+		if len(cloudRegions) > 0 {
+			// Remove duplicates
+			regionSet := make(map[string]bool)
+			var uniqueRegions []string
+			for _, region := range cloudRegions {
+				if !regionSet[region] {
+					regionSet[region] = true
+					uniqueRegions = append(uniqueRegions, region)
+				}
+			}
+			result.DNSRecords["CLOUD_REGIONS"] = strings.Join(uniqueRegions, ",")
+		}
+		
+		// Detect rotation patterns
+		if len(allIPSets) > 1 {
+			hasRotation := false
+			for i := 1; i < len(allIPSets); i++ {
+				if !equalStringSlices(allIPSets[0], allIPSets[i]) {
+					hasRotation = true
+					break
+				}
+			}
+			
+			if hasRotation {
+				result.DNSRecords["LOAD_BALANCING"] = "round-robin"
+				result.DNSRecords["UNIQUE_IPS"] = fmt.Sprintf("%d", len(allUniqueIPs))
+				result.DNSRecords["ROTATION_DETECTED"] = "true"
+			}
+		}
+		
+		// Collect additional DNS records
+		r.collectAdditionalRecords(timeoutCtx, domain, &result)
+	} else {
+		result.Status = "no_records"
+	}
+	
+	return result
+}
+
+// equalStringSlices checks if two string slices contain the same elements in the same order
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if v != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// ResolveWithRotationDetection performs DNS resolution with load balancing detection
+func (r *Resolver) ResolveWithRotationDetection(ctx context.Context, domain string) enumeration.DomainResult {
+	// Use the first resolver for rotation detection
+	return r.resolveWithRotationDetection(ctx, domain, 0)
+}
+
+// shouldUseRotationDetection determines if a domain should use rotation detection
+func (r *Resolver) shouldUseRotationDetection(domain string) bool {
+	// Use rotation detection for common load-balanced services and main target domains
+	loadBalancedPatterns := []string{
+		"google.com", "googleapis.com", "youtube.com", "googlevideo.com",
+		"facebook.com", "fbcdn.net", "instagram.com",
+		"amazon.com", "amazonaws.com", "aws.com",
+		"microsoft.com", "azure.com", "office.com",
+		"cloudflare.com", "cloudflaressl.com",
+		"akamai.com", "edgesuite.net", "akamaitechnologies.com",
+		"fastly.com", "fastlylb.net",
+		"twitter.com", "twimg.com",
+		"netflix.com", "nflximg.net", "nflxvideo.net",
+		"cdn.jsdelivr.net", "unpkg.com",
+	}
+	
+	domainLower := strings.ToLower(domain)
+	
+	// Check if domain matches known load-balanced services
+	for _, pattern := range loadBalancedPatterns {
+		if strings.Contains(domainLower, pattern) {
+			return true
+		}
+	}
+	
+	// Also use rotation detection for apex domains (main targets)
+	parts := strings.Split(domain, ".")
+	if len(parts) == 2 {
+		return true // Apex domain
+	}
+	
+	return false
 }
 
 // collectAdditionalRecords collects CNAME and SOA records using miekg/dns
@@ -466,6 +653,103 @@ func (r *Resolver) detectCloudDNS(ns string) string {
 	}
 	if strings.Contains(nsLower, "nsone.net") {
 		return "NS1"
+	}
+	
+	return ""
+}
+
+// detectCloudRegion identifies cloud provider regions from IP addresses
+func (r *Resolver) detectCloudRegion(ipAddr string) string {
+	ip := net.ParseIP(ipAddr)
+	if ip == nil {
+		return ""
+	}
+	
+	// AWS IP ranges (common ones)
+	awsRanges := []struct {
+		cidr   string
+		region string
+	}{
+		{"52.0.0.0/8", "AWS-Global"},
+		{"54.0.0.0/8", "AWS-Global"},
+		{"18.0.0.0/8", "AWS-Global"},
+		// US East (N. Virginia)
+		{"3.80.0.0/12", "AWS-us-east-1"},
+		{"52.0.0.0/11", "AWS-us-east-1"}, 
+		// US West (Oregon)
+		{"54.186.0.0/15", "AWS-us-west-2"},
+		{"52.24.0.0/14", "AWS-us-west-2"},
+		// Europe (Ireland)
+		{"54.72.0.0/13", "AWS-eu-west-1"},
+		{"52.48.0.0/12", "AWS-eu-west-1"},
+		// Asia Pacific (Tokyo)
+		{"54.92.0.0/12", "AWS-ap-northeast-1"},
+		{"52.68.0.0/14", "AWS-ap-northeast-1"},
+	}
+	
+	// Google Cloud IP ranges
+	gcpRanges := []struct {
+		cidr   string
+		region string
+	}{
+		{"35.0.0.0/8", "GCP-Global"},
+		{"34.0.0.0/8", "GCP-Global"},
+		{"104.196.0.0/14", "GCP-us-central1"},
+		{"104.154.0.0/15", "GCP-us-central1"},
+		{"35.184.0.0/13", "GCP-us-central1"},
+		{"35.194.0.0/16", "GCP-us-east1"},
+		{"35.185.0.0/16", "GCP-us-west1"},
+		{"35.197.0.0/16", "GCP-europe-west1"},
+		{"35.195.0.0/16", "GCP-asia-southeast1"},
+	}
+	
+	// Azure IP ranges
+	azureRanges := []struct {
+		cidr   string
+		region string
+	}{
+		{"13.0.0.0/8", "Azure-Global"},
+		{"40.0.0.0/8", "Azure-Global"},
+		{"52.0.0.0/8", "Azure-Global"},
+		{"104.0.0.0/8", "Azure-Global"},
+		{"20.0.0.0/8", "Azure-Global"},
+		// East US
+		{"13.82.0.0/16", "Azure-eastus"},
+		{"40.76.0.0/14", "Azure-eastus"},
+		// West US
+		{"13.91.0.0/16", "Azure-westus"},
+		{"40.118.0.0/15", "Azure-westus"},
+		// West Europe
+		{"13.69.0.0/16", "Azure-westeurope"},
+		{"40.68.0.0/14", "Azure-westeurope"},
+	}
+	
+	// Cloudflare ranges
+	cloudflareRanges := []struct {
+		cidr   string
+		region string
+	}{
+		{"104.16.0.0/12", "Cloudflare-Global"},
+		{"172.64.0.0/13", "Cloudflare-Global"},
+		{"108.162.192.0/18", "Cloudflare-Global"},
+	}
+	
+	// Check against all ranges
+	allRanges := [][]struct {
+		cidr   string
+		region string
+	}{awsRanges, gcpRanges, azureRanges, cloudflareRanges}
+	
+	for _, ranges := range allRanges {
+		for _, r := range ranges {
+			_, network, err := net.ParseCIDR(r.cidr)
+			if err != nil {
+				continue
+			}
+			if network.Contains(ip) {
+				return r.region
+			}
+		}
 	}
 	
 	return ""

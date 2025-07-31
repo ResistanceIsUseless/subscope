@@ -229,29 +229,52 @@ func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAn
 	if allPhases || geoAnalysis {
 		fmt.Fprintln(os.Stderr, "Phase 2.8: Geographic DNS analysis...")
 		geoDNS := dns.NewGeoDNSResolver(s.config)
-		geoResults, err := geoDNS.QueryFromAllRegions(ctx, domain)
+		
+		// Get domains to test (both the target domain and resolved domains)
+		var domainsToTest []string
+		domainsToTest = append(domainsToTest, domain)
+		
+		// Add common apex domain variations for comprehensive testing
+		commonSubdomains := []string{"www", "api", "cdn", "mail", "ftp"}
+		domainSet := make(map[string]bool)
+		domainSet[domain] = true
+		
+		for _, subdomain := range commonSubdomains {
+			testDomain := subdomain + "." + domain
+			if !domainSet[testDomain] {
+				domainsToTest = append(domainsToTest, testDomain)
+				domainSet[testDomain] = true
+			}
+		}
+		
+		// Also test resolved domains for geographic differences
+		for _, result := range results {
+			if result.Status == "resolved" && !domainSet[result.Domain] {
+				domainsToTest = append(domainsToTest, result.Domain)
+				domainSet[result.Domain] = true
+			}
+		}
+		
+		// Query all domains from all regions with enhanced details
+		geoResults, err := geoDNS.QueryDomainsFromAllRegions(ctx, domainsToTest)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: Geographic DNS analysis failed: %v\n", err)
 		} else {
-			// Analyze geographic differences
-			analysis := geoDNS.AnalyzeGeographicDifferences(geoResults)
+			// Add geo-enriched results to main results
+			results = append(results, geoResults...)
 			
-			// Add unique geographic domains to results
-			var geoDomains []string
-			for geoDomain := range analysis.UniqueDomains {
-				geoDomains = append(geoDomains, geoDomain)
+			// Also run legacy analysis for summary display
+			legacyGeoResults, _ := geoDNS.QueryFromAllRegions(ctx, domain)
+			if len(legacyGeoResults) > 0 {
+				analysis := geoDNS.AnalyzeGeographicDifferences(legacyGeoResults)
+				
+				// Print geographic analysis
+				if s.config.Verbose || len(analysis.UniqueDomains) > 0 {
+					analysis.PrintAnalysis()
+				}
 			}
 			
-			if len(geoDomains) > 0 {
-				geoEnumResults := enumerator.ProcessGeoDNSDomains(geoDomains)
-				results = append(results, geoEnumResults...)
-				fmt.Fprintf(os.Stderr, "Added %d geographically-specific domains to enumeration results\n", len(geoDomains))
-			}
-			
-			// Print geographic analysis
-			if s.config.Verbose || len(analysis.UniqueDomains) > 0 {
-				analysis.PrintAnalysis()
-			}
+			fmt.Fprintf(os.Stderr, "Added %d geographically-specific domains to enumeration results\n", len(geoResults))
 		}
 	}
 	
