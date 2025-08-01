@@ -27,7 +27,21 @@ dnsx-input.txt
 
 # Configuration files (user-specific)
 config.yaml
+config/config-with-keys.yaml
+config/*-keys.yaml
 .subscope/
+
+# Test result files (JSON output from scans)
+*_test.json
+*test*.json
+test_*.json
+simple_*.txt
+verbose_*.json
+progressive_*.json
+shopify_*.json
+hulu_*.json
+mapbox_*.json
+resume.cfg
 
 # Documentation files (except README.md)
 *.md

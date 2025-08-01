@@ -1,0 +1,42 @@
+version: "1.0"
+target:
+  domain: ""
+  scope:
+    - "*.example.com"
+  exclusions: []
+
+subfinder:
+  config_path: ""
+  providers: []  # Empty means use all available sources
+  timeout: 30
+  api_keys:
+    censys:
+      id: "your-censys-api-id"
+      secret: "your-censys-api-secret"
+    certspotter: "your-certspotter-api-key"
+    shodan: "your-shodan-api-key"
+    hunter_io: "your-hunter-io-api-key"
+    securitytrails: "your-securitytrails-api-key"
+    virustotal: "your-virustotal-api-key"
+    fofa: "your-fofa-api-key"
+    quake: "your-quake-api-key"
+
+rate_limit:
+  global: 10
+  jitter: true
+
+stealth:
+  user_agents:
+    - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    - "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+  random_delay_ms: 100
+  request_jitter: true
+
+alterx:
+  enable_enrichment: true
+  max_permutations: 10000
+
+output:
+  format: "json"
+  file: "results.json"
