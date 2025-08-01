@@ -1,9 +1,52 @@
 version: "1.0"
 target:
   domain: ""
-  scope:
-    - "*.example.com"
-  exclusions: []
+
+# Feature flags - control which modules are enabled
+features:
+  passive: true               # subfinder passive enumeration  
+  zone_transfer: true         # DNS zone transfer attempts
+  http_analysis: true         # httpx analysis
+  dns_brute_force: false      # alterx wordlist generation (high volume)
+  geo_dns: false              # geographic DNS analysis (API calls)
+  rdns: true                  # reverse DNS lookups
+  certificate_transparency: false # CT log analysis
+  arin_lookup: false          # ARIN organization data
+  persistence: false          # domain history tracking
+
+# Rate limiting profiles (use --profile flag to activate)
+profiles:
+  stealth:
+    rate_limit:
+      global: 5
+      jitter: true
+    stealth:
+      user_agents:
+        - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+      random_delay_ms: 1000
+      request_jitter: true
+  
+  normal:
+    rate_limit:
+      global: 20
+      jitter: true
+    stealth:
+      user_agents:
+        - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+      random_delay_ms: 250
+      request_jitter: true
+  
+  aggressive:
+    rate_limit:
+      global: 100
+      jitter: false
+    stealth:
+      user_agents:
+        - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+      random_delay_ms: 50
+      request_jitter: false
 
 subfinder:
   config_path: ""
@@ -21,6 +64,11 @@ subfinder:
     fofa: "your-fofa-api-key"
     quake: "your-quake-api-key"
 
+alterx:
+  enable_enrichment: true
+  max_permutations: 10000
+
+# Default rate limits and stealth settings (overridden by profiles)
 rate_limit:
   global: 10
   jitter: true
@@ -29,13 +77,8 @@ stealth:
   user_agents:
     - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    - "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
   random_delay_ms: 100
   request_jitter: true
-
-alterx:
-  enable_enrichment: true
-  max_permutations: 10000
 
 output:
   format: "json"

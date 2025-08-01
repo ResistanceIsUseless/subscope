@@ -118,6 +118,11 @@ func (g *GeoDNSResolver) QueryFromAllRegions(ctx context.Context, domain string)
 
 // QueryDomainsFromAllRegions queries multiple domains and returns enriched results with GeoDNS details
 func (g *GeoDNSResolver) QueryDomainsFromAllRegions(ctx context.Context, domains []string) ([]enumeration.DomainResult, error) {
+	// Return early if no domains provided
+	if len(domains) == 0 {
+		return []enumeration.DomainResult{}, nil
+	}
+	
 	// Map to track all results by domain
 	domainRegionMap := make(map[string]map[string]enumeration.RegionalDNSInfo)
 	allResults := make(map[string]*enumeration.DomainResult)
@@ -146,6 +151,11 @@ func (g *GeoDNSResolver) QueryDomainsFromAllRegions(ctx context.Context, domains
 							RegionalRecords: make(map[string]enumeration.RegionalDNSInfo),
 						},
 					}
+				}
+				
+				// Ensure domainRegionMap is initialized for this domain
+				if _, exists := domainRegionMap[result.Domain]; !exists {
+					domainRegionMap[result.Domain] = make(map[string]enumeration.RegionalDNSInfo)
 				}
 				
 				// Collect regional DNS info

@@ -35,7 +35,7 @@ func NewSubScope(cfg *config.Config) *SubScope {
 	}
 }
 
-func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAnalysis bool, inputDomainsPath string, mergeMode bool, enableProgress bool) error {
+func (s *SubScope) Run(ctx context.Context, domain string, inputDomainsPath string, mergeMode bool, enableProgress bool) error {
 	// Initialize progress tracker (disabled in verbose mode to avoid conflicts)
 	progressTracker := progress.New(enableProgress && !s.config.Verbose)
 	
@@ -63,14 +63,20 @@ func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAn
 		progressTracker.Complete()
 	}
 	
-	// Phase 1: Passive enumeration
-	progressTracker.StartPhase("Passive enumeration", 0) // Unknown total
-	domains, err := enumerator.RunPassiveEnumeration(ctx, domain)
-	if err != nil {
-		return fmt.Errorf("passive enumeration failed: %w", err)
+	// Phase 1: Passive enumeration  
+	var domains []string
+	if s.config.Features.Passive {
+		progressTracker.StartPhase("Passive enumeration", 0) // Unknown total
+		passiveDomains, err := enumerator.RunPassiveEnumeration(ctx, domain)
+		if err != nil {
+			return fmt.Errorf("passive enumeration failed: %w", err)
+		}
+		domains = append(domains, passiveDomains...)
+		progressTracker.Update(len(domains))
+		progressTracker.Complete()
+	} else {
+		progressTracker.Info("Passive enumeration disabled")
 	}
-	progressTracker.Update(len(domains))
-	progressTracker.Complete()
 	
 	// Merge input domains with discovered domains if merge flag is set
 	if len(inputDomainList) > 0 {
@@ -107,31 +113,35 @@ func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAn
 		}
 	}
 	
-	// Phase 1.1: Zone transfer attempt (early in the process)
-	progressTracker.StartPhase("Zone transfer (AXFR)", 1)
+	// Phase 1.1: Zone transfer attempt  
 	resolver := dns.New(s.config)
-	zoneTransferDomains, err := resolver.AttemptZoneTransfer(ctx, domain)
-	if err != nil {
-		if s.config.Verbose {
-			progressTracker.Info("Zone transfer attempt failed: %v", err)
+	if s.config.Features.ZoneTransfer {
+		progressTracker.StartPhase("Zone transfer (AXFR)", 1)
+		zoneTransferDomains, err := resolver.AttemptZoneTransfer(ctx, domain)
+		if err != nil {
+			if s.config.Verbose {
+				progressTracker.Info("Zone transfer attempt failed: %v", err)
+			}
+		} else if len(zoneTransferDomains) > 0 {
+			// Add zone transfer domains to results
+			zoneResults := enumerator.ProcessZoneTransferDomains(zoneTransferDomains)
+			results = append(results, zoneResults...)
+			progressTracker.Info("Zone transfer found %d domains", len(zoneTransferDomains))
 		}
-	} else if len(zoneTransferDomains) > 0 {
-		// Add zone transfer domains to results
-		zoneResults := enumerator.ProcessZoneTransferDomains(zoneTransferDomains)
-		results = append(results, zoneResults...)
-		progressTracker.Info("Zone transfer found %d domains", len(zoneTransferDomains))
+		progressTracker.Complete()
+	} else {
+		progressTracker.Info("Zone transfer disabled")
 	}
-	progressTracker.Complete()
 	
 	// Phase 1.7: HTTP/HTTPS analysis with httpx (headers, SSL certs, redirects)
-	httpAnalyzer := http.New(s.config)
-	// Analyze up to 500 domains to find additional subdomains via HTTP headers, SSL certs, and redirects
-	sampleSize := len(domains)
-	if sampleSize > 500 {
-		sampleSize = 500
-	}
 	var httpDomains []string
-	if sampleSize > 0 {
+	if s.config.Features.HTTPAnalysis && len(domains) > 0 {
+		httpAnalyzer := http.New(s.config)
+		// Analyze up to 500 domains to find additional subdomains via HTTP headers, SSL certs, and redirects
+		sampleSize := len(domains)
+		if sampleSize > 500 {
+			sampleSize = 500
+		}
 		progressTracker.StartPhase("HTTP/HTTPS analysis", sampleSize)
 		httpDomains, err = httpAnalyzer.AnalyzeDomains(ctx, domains[:sampleSize], domain)
 		if err != nil {
@@ -143,12 +153,13 @@ func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAn
 			progressTracker.Info("Added %d httpx-discovered domains to enumeration results", len(httpDomains))
 		}
 		progressTracker.Complete()
+	} else if !s.config.Features.HTTPAnalysis {
+		progressTracker.Info("HTTP analysis disabled")
 	}
 
-	// Optional phases (run only with --all flag)
+	// Phase 1.5: Certificate Transparency log analysis
 	var ctDomains []string
-	if allPhases {
-		// Phase 1.5: Certificate Transparency log analysis
+	if s.config.Features.CertificateTransparency {
 		fmt.Fprintln(os.Stderr, "Phase 1.5: Certificate Transparency log analysis...")
 		ctAnalyzer := ct.New(s.config)
 		ctDomains, err = ctAnalyzer.QueryCertificates(ctx, domain)
@@ -160,8 +171,12 @@ func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAn
 			results = append(results, ctResults...)
 			fmt.Fprintf(os.Stderr, "Added %d CT domains to enumeration results\n", len(ctDomains))
 		}
+	} else {
+		progressTracker.Info("Certificate Transparency analysis disabled")
+	}
 
-		// Phase 1.6: Dynamic wordlist generation with AlterX (after HTTP to include new findings)
+	// Phase 1.6: Dynamic wordlist generation with AlterX (after HTTP to include new findings)
+	if s.config.Features.DNSBruteForce {
 		fmt.Fprintln(os.Stderr, "Phase 1.6: Dynamic wordlist generation...")
 		alterxIntegration := alterx.New(s.config)
 		// Combine subfinder, CT, and HTTP domains for permutation
@@ -176,6 +191,8 @@ func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAn
 			results = append(results, permutationResults...)
 			fmt.Fprintf(os.Stderr, "Added %d permutations to enumeration results\n", len(permutations))
 		}
+	} else {
+		progressTracker.Info("DNS brute force disabled")
 	}
 
 	// Phase 2: DNS resolution
@@ -198,20 +215,20 @@ func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAn
 	progressTracker.Complete()
 	
 	// Phase 2.5: RDNS analysis on resolved IPs
-	fmt.Fprintln(os.Stderr, "Phase 2.5: RDNS analysis...")
-	rdnsAnalyzer := rdns.New(s.config)
-	rdnsDomains, err := rdnsAnalyzer.AnalyzeIPs(ctx, results, domain)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: RDNS analysis failed: %v\n", err)
-	} else if len(rdnsDomains) > 0 {
-		// Add RDNS-discovered domains to results
-		rdnsResults := enumerator.ProcessRDNSDomains(rdnsDomains)
-		results = append(results, rdnsResults...)
-		fmt.Fprintf(os.Stderr, "Added %d RDNS-discovered domains to enumeration results\n", len(rdnsDomains))
-	}
-	
-	// Phase 2.6: Enhanced RDNS - IP range scanning (similar to dnsrecon)
-	if allPhases {
+	if s.config.Features.RDNS {
+		fmt.Fprintln(os.Stderr, "Phase 2.5: RDNS analysis...")
+		rdnsAnalyzer := rdns.New(s.config)
+		rdnsDomains, err := rdnsAnalyzer.AnalyzeIPs(ctx, results, domain)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: RDNS analysis failed: %v\n", err)
+		} else if len(rdnsDomains) > 0 {
+			// Add RDNS-discovered domains to results
+			rdnsResults := enumerator.ProcessRDNSDomains(rdnsDomains)
+			results = append(results, rdnsResults...)
+			fmt.Fprintf(os.Stderr, "Added %d RDNS-discovered domains to enumeration results\n", len(rdnsDomains))
+		}
+		
+		// Phase 2.6: Enhanced RDNS - IP range scanning (similar to dnsrecon)
 		fmt.Fprintln(os.Stderr, "Phase 2.6: RDNS IP range scanning...")
 		rdnsRangeDomains, err := rdnsAnalyzer.ScanIPRangesFromSubnets(ctx, results, domain)
 		if err != nil {
@@ -222,11 +239,12 @@ func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAn
 			results = append(results, rdnsRangeResults...)
 			fmt.Fprintf(os.Stderr, "Added %d RDNS range-discovered domains to enumeration results\n", len(rdnsRangeDomains))
 		}
-		
+	} else {
+		progressTracker.Info("RDNS analysis disabled")
 	}
 	
-	// Phase 2.8: Geographic DNS analysis (can run independently or with -all)
-	if allPhases || geoAnalysis {
+	// Phase 2.8: Geographic DNS analysis
+	if s.config.Features.GeoDNS {
 		fmt.Fprintln(os.Stderr, "Phase 2.8: Geographic DNS analysis...")
 		geoDNS := dns.NewGeoDNSResolver(s.config)
 		
@@ -276,16 +294,17 @@ func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAn
 			
 			fmt.Fprintf(os.Stderr, "Added %d geographically-specific domains to enumeration results\n", len(geoResults))
 		}
+	} else {
+		progressTracker.Info("Geographic DNS analysis disabled")
 	}
 	
 	// Phase 2.7: Wildcard filtering
 	fmt.Fprintln(os.Stderr, "Phase 2.7: Wildcard filtering...")
 	results = wildcardDetector.FilterWildcardResults(results, domain)
 	
-	// Optional phases (run only with --all flag)
+	// Phase 2.8: Organization data from RDAP (ARIN, RIPE, etc.)
 	var orgData []arin.OrganizationInfo
-	if allPhases {
-		// Phase 2.8: Organization data from RDAP (ARIN, RIPE, etc.)
+	if s.config.Features.ARINLookup {
 		fmt.Fprintln(os.Stderr, "Phase 2.8: Organization analysis via RDAP...")
 		arinAnalyzer := arin.New(s.config)
 		orgData, err = arinAnalyzer.AnalyzeIPs(ctx, results)
@@ -294,14 +313,20 @@ func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAn
 		} else if len(orgData) > 0 {
 			fmt.Fprintf(os.Stderr, "Retrieved organization data for %d IP addresses\n", len(orgData))
 		}
-		
-		// Phase 2.9: Domain tracking and new domain flagging
+	} else {
+		progressTracker.Info("ARIN lookup disabled")
+	}
+	
+	// Phase 2.9: Domain tracking and new domain flagging
+	if s.config.Features.Persistence {
 		fmt.Fprintln(os.Stderr, "Phase 2.9: Domain history tracking...")
 		tracker := persistence.New(s.config)
 		results, err = tracker.TrackDomains(domain, results)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: Domain tracking failed: %v\n", err)
 		}
+	} else {
+		progressTracker.Info("Persistence tracking disabled")
 	}
 	
 	// Phase 3: Output results
@@ -320,6 +345,7 @@ func (s *SubScope) Run(ctx context.Context, domain string, allPhases bool, geoAn
 
 func main() {
 	var (
+		// Basic flags
 		domain       = flag.String("d", "", "Target domain to enumerate")
 		domainLong   = flag.String("domain", "", "Target domain to enumerate")
 		configPath   = flag.String("c", "", "Configuration file path")
@@ -328,16 +354,31 @@ func main() {
 		outputLong   = flag.String("output", "results.json", "Output file path")
 		format       = flag.String("f", "json", "Output format (json, csv, massdns, dnsx, aquatone, eyewitness)")
 		formatLong   = flag.String("format", "json", "Output format (json, csv, massdns, dnsx, aquatone, eyewitness)")
+		
+		// Feature flags - modular control
+		passive        = flag.Bool("passive", false, "Enable passive enumeration (subfinder)")
+		zoneTransfer   = flag.Bool("zone-transfer", false, "Enable DNS zone transfer attempts")
+		httpAnalysis   = flag.Bool("http-analysis", false, "Enable HTTP/HTTPS analysis (httpx)")
+		dnsBruteForce  = flag.Bool("dns-brute-force", false, "Enable DNS brute forcing (alterx)")
+		geoDNS         = flag.Bool("geo-dns", false, "Enable geographic DNS analysis")
+		rdns           = flag.Bool("rdns", false, "Enable reverse DNS lookups")
+		certTransparency = flag.Bool("cert-transparency", false, "Enable certificate transparency analysis")
+		arinLookup     = flag.Bool("arin-lookup", false, "Enable ARIN organization data lookup")
+		persistenceFlag = flag.Bool("persistence", false, "Enable domain history tracking")
+		
+		// Legacy flags for compatibility
+		allPhases    = flag.Bool("a", false, "Run all phases including CT, AlterX, RDAP, and persistence")
+		allPhasesLong = flag.Bool("all", false, "Run all phases including CT, AlterX, RDAP, and persistence")
+		geoAnalysis  = flag.Bool("g", false, "Enable geographic DNS analysis (legacy)")
+		geoLong      = flag.Bool("geo", false, "Enable geographic DNS analysis (legacy)")
+		
+		// Other flags
 		interactive  = flag.Bool("i", false, "Run in interactive TUI mode")
 		interactiveLong = flag.Bool("interactive", false, "Run in interactive TUI mode")
 		createConfig = flag.Bool("create-config", false, "Create default configuration file")
 		showStats    = flag.Bool("s", false, "Show domain history statistics")
 		showStatsLong = flag.Bool("stats", false, "Show domain history statistics")
 		showNew      = flag.String("new-since", "", "Show new domains since date (YYYY-MM-DD)")
-		allPhases    = flag.Bool("a", false, "Run all phases including CT, AlterX, RDAP, and persistence")
-		allPhasesLong = flag.Bool("all", false, "Run all phases including CT, AlterX, RDAP, and persistence")
-		geoAnalysis  = flag.Bool("g", false, "Enable geographic DNS analysis")
-		geoLong      = flag.Bool("geo", false, "Enable geographic DNS analysis")
 		inputDomains = flag.String("input-domains", "", "Path to file containing additional domains to scan")
 		mergeDomains = flag.Bool("merge", false, "Merge input domains with discovered domains")
 		showProgress = flag.Bool("progress", false, "Show progress indicators")
@@ -371,7 +412,6 @@ func main() {
 	targetInteractive := *interactive || *interactiveLong
 	targetStats := *showStats || *showStatsLong
 	targetAllPhases := *allPhases || *allPhasesLong
-	targetGeoAnalysis := *geoAnalysis || *geoLong
 	targetVerbose := *verbose || *verboseLong
 
 	// Handle config creation
@@ -421,19 +461,36 @@ func main() {
 	if targetDomain == "" {
 		fmt.Println("Usage: subscope -d example.com")
 		fmt.Println("       subscope --domain example.com")
-		fmt.Println("       subscope -d example.com -a (run all phases)")
-		fmt.Println("       subscope -d example.com -g (geographic DNS analysis)")
+		fmt.Println("\nModular Feature Control:")
+		fmt.Println("       subscope -d example.com --passive                    (passive enumeration only)")
+		fmt.Println("       subscope -d example.com --passive --http-analysis    (passive + HTTP analysis)")
+		fmt.Println("       subscope -d example.com --geo-dns                    (geographic DNS only)")
+		fmt.Println("       subscope -d example.com --dns-brute-force            (DNS brute forcing only)")
+		fmt.Println("       subscope -d example.com --passive --rdns --geo-dns   (multiple features)")
+		fmt.Println("\nLegacy Modes (for compatibility):")
+		fmt.Println("       subscope -d example.com -a                          (all phases)")
+		fmt.Println("       subscope -d example.com -g                          (geographic DNS)")
+		fmt.Println("\nOther Usage:")
 		fmt.Println("       subscope -d example.com --input-domains domains.txt")
 		fmt.Println("       subscope -d example.com --input-domains domains.txt --merge")
-		fmt.Println("       subscope -d example.com -s (show statistics)")
+		fmt.Println("       subscope -d example.com -s                          (show statistics)")
 		fmt.Println("       subscope -d example.com --new-since 2024-01-01")
-		fmt.Println("\nDefault phases: Wildcard detection, Passive enumeration, HTTP analysis, RDNS")
-		fmt.Println("All phases (-a/--all): Adds Certificate Transparency, AlterX, RDAP, and persistence tracking")
-		fmt.Println("Geographic DNS (-g/--geo): Queries from multiple global regions for geo-specific subdomains")
-		fmt.Println("Input domains (--input-domains): Load additional domains from file")
-		fmt.Println("Merge mode (--merge): Merge input domains with discovered domains (default: replace)")
-		fmt.Println("Progress (--progress): Show progress indicators for long-running operations")
-		fmt.Println("Profile (--profile): Apply rate limit profile (stealth, normal, aggressive)")
+		fmt.Println("\nFeature Flags:")
+		fmt.Println("  --passive              Enable passive enumeration (subfinder)")
+		fmt.Println("  --zone-transfer        Enable DNS zone transfer attempts")
+		fmt.Println("  --http-analysis        Enable HTTP/HTTPS analysis (httpx)")
+		fmt.Println("  --dns-brute-force      Enable DNS brute forcing (alterx)")
+		fmt.Println("  --geo-dns              Enable geographic DNS analysis")
+		fmt.Println("  --rdns                 Enable reverse DNS lookups")
+		fmt.Println("  --cert-transparency    Enable certificate transparency analysis")
+		fmt.Println("  --arin-lookup          Enable ARIN organization data lookup")
+		fmt.Println("  --persistence          Enable domain history tracking")
+		fmt.Println("\nProfiles:")
+		fmt.Println("  --profile stealth      Low rate limits, high delays (5 req/s)")
+		fmt.Println("  --profile normal       Balanced settings (20 req/s)")
+		fmt.Println("  --profile aggressive   High speed, minimal delays (100 req/s)")
+		fmt.Println("\nNOTE: If no feature flags are specified, default features are used from config.")
+		fmt.Println("      Default features: passive, zone-transfer, http-analysis, rdns")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
@@ -446,12 +503,75 @@ func main() {
 	
 	// Apply profile if specified
 	if *profile != "" {
-		cfg, err = config.LoadProfile(*profile, cfg)
+		err = cfg.ApplyProfile(*profile)
 		if err != nil {
-			log.Fatalf("Failed to load profile: %v", err)
+			log.Fatalf("Failed to apply profile: %v", err)
 		}
 		fmt.Fprintf(os.Stderr, "Applied profile: %s\n", *profile)
 	}
+	
+	// Handle feature flags - collect CLI overrides
+	featureOverrides := make(map[string]bool)
+	
+	// Check if any specific feature flags were set
+	if *passive {
+		featureOverrides["passive"] = true
+	}
+	if *zoneTransfer {
+		featureOverrides["zone_transfer"] = true
+	}
+	if *httpAnalysis {
+		featureOverrides["http_analysis"] = true
+	}
+	if *dnsBruteForce {
+		featureOverrides["dns_brute_force"] = true
+	}
+	if *geoDNS || *geoAnalysis || *geoLong {
+		featureOverrides["geo_dns"] = true
+	}
+	if *rdns {
+		featureOverrides["rdns"] = true
+	}
+	if *certTransparency {
+		featureOverrides["certificate_transparency"] = true
+	}
+	if *arinLookup {
+		featureOverrides["arin_lookup"] = true
+	}
+	if *persistenceFlag {
+		featureOverrides["persistence"] = true
+	}
+	
+	// Handle legacy --all flag
+	if targetAllPhases {
+		featureOverrides["passive"] = true
+		featureOverrides["zone_transfer"] = true
+		featureOverrides["http_analysis"] = true
+		featureOverrides["dns_brute_force"] = true
+		featureOverrides["geo_dns"] = true
+		featureOverrides["rdns"] = true
+		featureOverrides["certificate_transparency"] = true
+		featureOverrides["arin_lookup"] = true
+		featureOverrides["persistence"] = true
+	}
+	
+	// If specific feature flags were provided, disable all default features first
+	// then enable only the specified ones
+	if len(featureOverrides) > 0 && !targetAllPhases {
+		// Disable all features first
+		cfg.Features.Passive = false
+		cfg.Features.ZoneTransfer = false
+		cfg.Features.HTTPAnalysis = false
+		cfg.Features.DNSBruteForce = false
+		cfg.Features.GeoDNS = false
+		cfg.Features.RDNS = false
+		cfg.Features.CertificateTransparency = false
+		cfg.Features.ARINLookup = false
+		cfg.Features.Persistence = false
+	}
+	
+	// Apply feature overrides
+	cfg.OverrideFeatures(featureOverrides)
 	
 	// Override config with command line flags
 	cfg.Target.Domain = targetDomain
@@ -467,7 +587,7 @@ func main() {
 	subscope := NewSubScope(cfg)
 	
 	ctx := context.Background()
-	if err := subscope.Run(ctx, targetDomain, targetAllPhases, targetGeoAnalysis, *inputDomains, *mergeDomains, *showProgress); err != nil {
+	if err := subscope.Run(ctx, targetDomain, *inputDomains, *mergeDomains, *showProgress); err != nil {
 		log.Fatalf("Enumeration failed: %v", err)
 	}
 
