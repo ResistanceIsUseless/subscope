@@ -399,13 +399,15 @@ func main() {
 		targetConfig = *configLong
 	}
 	
+	// Fix: Only use outputLong if it was explicitly set (not default)
 	targetOutput := *output
-	if *outputLong != "" {
+	if flag.Lookup("output").Value.String() != flag.Lookup("output").DefValue {
 		targetOutput = *outputLong
 	}
 	
+	// Fix: Only use formatLong if it was explicitly set (not default)  
 	targetFormat := *format
-	if *formatLong != "" {
+	if flag.Lookup("format").Value.String() != flag.Lookup("format").DefValue {
 		targetFormat = *formatLong
 	}
 	
