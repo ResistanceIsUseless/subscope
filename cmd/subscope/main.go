@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -344,254 +343,109 @@ func (s *SubScope) Run(ctx context.Context, domain string, inputDomainsPath stri
 }
 
 func main() {
-	var (
-		// Basic flags
-		domain       = flag.String("d", "", "Target domain to enumerate")
-		domainLong   = flag.String("domain", "", "Target domain to enumerate")
-		configPath   = flag.String("c", "", "Configuration file path")
-		configLong   = flag.String("config", "", "Configuration file path")
-		output       = flag.String("o", "results.json", "Output file path")
-		outputLong   = flag.String("output", "results.json", "Output file path")
-		format       = flag.String("f", "json", "Output format (json, csv, massdns, dnsx, aquatone, eyewitness)")
-		formatLong   = flag.String("format", "json", "Output format (json, csv, massdns, dnsx, aquatone, eyewitness)")
-		
-		// Feature flags - modular control
-		passive        = flag.Bool("passive", false, "Enable passive enumeration (subfinder)")
-		zoneTransfer   = flag.Bool("zone-transfer", false, "Enable DNS zone transfer attempts")
-		httpAnalysis   = flag.Bool("http-analysis", false, "Enable HTTP/HTTPS analysis (httpx)")
-		dnsBruteForce  = flag.Bool("dns-brute-force", false, "Enable DNS brute forcing (alterx)")
-		geoDNS         = flag.Bool("geo-dns", false, "Enable geographic DNS analysis")
-		rdns           = flag.Bool("rdns", false, "Enable reverse DNS lookups")
-		certTransparency = flag.Bool("cert-transparency", false, "Enable certificate transparency analysis")
-		arinLookup     = flag.Bool("arin-lookup", false, "Enable ARIN organization data lookup")
-		persistenceFlag = flag.Bool("persistence", false, "Enable domain history tracking")
-		
-		// Legacy flags for compatibility
-		allPhases    = flag.Bool("a", false, "Run all phases including CT, AlterX, RDAP, and persistence")
-		allPhasesLong = flag.Bool("all", false, "Run all phases including CT, AlterX, RDAP, and persistence")
-		geoAnalysis  = flag.Bool("g", false, "Enable geographic DNS analysis (legacy)")
-		geoLong      = flag.Bool("geo", false, "Enable geographic DNS analysis (legacy)")
-		
-		// Other flags
-		interactive  = flag.Bool("i", false, "Run in interactive TUI mode")
-		interactiveLong = flag.Bool("interactive", false, "Run in interactive TUI mode")
-		createConfig = flag.Bool("create-config", false, "Create default configuration file")
-		showStats    = flag.Bool("s", false, "Show domain history statistics")
-		showStatsLong = flag.Bool("stats", false, "Show domain history statistics")
-		showNew      = flag.String("new-since", "", "Show new domains since date (YYYY-MM-DD)")
-		inputDomains = flag.String("input-domains", "", "Path to file containing additional domains to scan")
-		mergeDomains = flag.Bool("merge", false, "Merge input domains with discovered domains")
-		showProgress = flag.Bool("progress", false, "Show progress indicators")
-		profile      = flag.String("profile", "", "Rate limit profile (stealth, normal, aggressive)")
-		verbose      = flag.Bool("v", false, "Enable verbose logging")
-		verboseLong  = flag.Bool("verbose", false, "Enable verbose logging")
-	)
-	flag.Parse()
-
-	// Merge short and long flag values (long takes precedence if both are set)
-	targetDomain := *domain
-	if *domainLong != "" {
-		targetDomain = *domainLong
-	}
+	// Parse command line flags
+	flags := parseFlags()
 	
-	targetConfig := *configPath
-	if *configLong != "" {
-		targetConfig = *configLong
-	}
-	
-	// Fix: Only use outputLong if it was explicitly set (not default)
-	targetOutput := *output
-	if flag.Lookup("output").Value.String() != flag.Lookup("output").DefValue {
-		targetOutput = *outputLong
-	}
-	
-	// Fix: Only use formatLong if it was explicitly set (not default)  
-	targetFormat := *format
-	if flag.Lookup("format").Value.String() != flag.Lookup("format").DefValue {
-		targetFormat = *formatLong
-	}
-	
-	targetInteractive := *interactive || *interactiveLong
-	targetStats := *showStats || *showStatsLong
-	targetAllPhases := *allPhases || *allPhasesLong
-	targetVerbose := *verbose || *verboseLong
-
-	// Handle config creation
-	if *createConfig {
+	// Handle utility commands first
+	if flags.CreateConfig {
 		if err := config.CreateDefault(); err != nil {
 			log.Fatalf("Failed to create default config: %v", err)
 		}
+		fmt.Println("Default configuration created successfully")
 		os.Exit(0)
 	}
-
+	
+	// Validate required flags
+	if flags.Domain == "" {
+		ShowUsage()
+		os.Exit(1)
+	}
+	
 	// Handle statistics display
-	if targetStats && targetDomain != "" {
-		cfg, _ := config.Load(targetConfig)
+	if flags.ShowStats {
+		cfg, _ := config.Load(flags.Config)
 		tracker := persistence.New(cfg)
-		stats, err := tracker.GetDomainStats(targetDomain)
+		stats, err := tracker.GetDomainStats(flags.Domain)
 		if err != nil {
 			log.Fatalf("Failed to get domain stats: %v", err)
 		}
-		fmt.Fprintf(os.Stderr, "Domain History for %s:\n", targetDomain)
-		fmt.Fprintf(os.Stderr, "Total domains tracked: %d\n", len(stats.Domains))
-		fmt.Fprintf(os.Stderr, "Last updated: %s\n", stats.LastUpdated.Format("2006-01-02 15:04:05"))
+		fmt.Printf("Domain History for %s:\n", flags.Domain)
+		fmt.Printf("Total domains tracked: %d\n", len(stats.Domains))
+		fmt.Printf("Last updated: %s\n", stats.LastUpdated.Format("2006-01-02 15:04:05"))
 		os.Exit(0)
 	}
-
+	
 	// Handle new domains display
-	if *showNew != "" && targetDomain != "" {
-		cfg, _ := config.Load(targetConfig)
+	if flags.NewSince != "" {
+		cfg, _ := config.Load(flags.Config)
 		tracker := persistence.New(cfg)
-		since, err := time.Parse("2006-01-02", *showNew)
+		since, err := time.Parse("2006-01-02", flags.NewSince)
 		if err != nil {
 			log.Fatalf("Invalid date format. Use YYYY-MM-DD: %v", err)
 		}
-		newDomains, err := tracker.GetNewDomains(targetDomain, since)
+		newDomains, err := tracker.GetNewDomains(flags.Domain, since)
 		if err != nil {
 			log.Fatalf("Failed to get new domains: %v", err)
 		}
-		fmt.Fprintf(os.Stderr, "New domains for %s since %s:\n", targetDomain, *showNew)
+		fmt.Printf("New domains for %s since %s:\n", flags.Domain, flags.NewSince)
 		for _, domain := range newDomains {
-			fmt.Fprintf(os.Stderr, "  %s (first seen: %s, sources: %v)\n", 
+			fmt.Printf("  %s (first seen: %s, sources: %v)\n", 
 				domain.Domain, 
 				domain.FirstSeen.Format("2006-01-02 15:04:05"),
 				domain.Sources)
 		}
 		os.Exit(0)
 	}
-
-	if targetDomain == "" {
-		fmt.Println("Usage: subscope -d example.com")
-		fmt.Println("       subscope --domain example.com")
-		fmt.Println("\nModular Feature Control:")
-		fmt.Println("       subscope -d example.com --passive                    (passive enumeration only)")
-		fmt.Println("       subscope -d example.com --passive --http-analysis    (passive + HTTP analysis)")
-		fmt.Println("       subscope -d example.com --geo-dns                    (geographic DNS only)")
-		fmt.Println("       subscope -d example.com --dns-brute-force            (DNS brute forcing only)")
-		fmt.Println("       subscope -d example.com --passive --rdns --geo-dns   (multiple features)")
-		fmt.Println("\nLegacy Modes (for compatibility):")
-		fmt.Println("       subscope -d example.com -a                          (all phases)")
-		fmt.Println("       subscope -d example.com -g                          (geographic DNS)")
-		fmt.Println("\nOther Usage:")
-		fmt.Println("       subscope -d example.com --input-domains domains.txt")
-		fmt.Println("       subscope -d example.com --input-domains domains.txt --merge")
-		fmt.Println("       subscope -d example.com -s                          (show statistics)")
-		fmt.Println("       subscope -d example.com --new-since 2024-01-01")
-		fmt.Println("\nFeature Flags:")
-		fmt.Println("  --passive              Enable passive enumeration (subfinder)")
-		fmt.Println("  --zone-transfer        Enable DNS zone transfer attempts")
-		fmt.Println("  --http-analysis        Enable HTTP/HTTPS analysis (httpx)")
-		fmt.Println("  --dns-brute-force      Enable DNS brute forcing (alterx)")
-		fmt.Println("  --geo-dns              Enable geographic DNS analysis")
-		fmt.Println("  --rdns                 Enable reverse DNS lookups")
-		fmt.Println("  --cert-transparency    Enable certificate transparency analysis")
-		fmt.Println("  --arin-lookup          Enable ARIN organization data lookup")
-		fmt.Println("  --persistence          Enable domain history tracking")
-		fmt.Println("\nProfiles:")
-		fmt.Println("  --profile stealth      Low rate limits, high delays (5 req/s)")
-		fmt.Println("  --profile normal       Balanced settings (20 req/s)")
-		fmt.Println("  --profile aggressive   High speed, minimal delays (100 req/s)")
-		fmt.Println("\nNOTE: If no feature flags are specified, default features are used from config.")
-		fmt.Println("      Default features: passive, zone-transfer, http-analysis, rdns")
-		flag.PrintDefaults()
-		os.Exit(1)
-	}
-
+	
 	// Load configuration
-	cfg, err := config.Load(targetConfig)
+	cfg, err := config.Load(flags.Config)
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 	
 	// Apply profile if specified
-	if *profile != "" {
-		err = cfg.ApplyProfile(*profile)
+	if flags.Profile != "" {
+		err = cfg.ApplyProfile(flags.Profile)
 		if err != nil {
 			log.Fatalf("Failed to apply profile: %v", err)
 		}
-		fmt.Fprintf(os.Stderr, "Applied profile: %s\n", *profile)
+		if flags.Verbose {
+			fmt.Fprintf(os.Stderr, "Applied profile: %s\n", flags.Profile)
+		}
 	}
 	
-	// Handle feature flags - collect CLI overrides
-	featureOverrides := make(map[string]bool)
-	
-	// Check if any specific feature flags were set
-	if *passive {
-		featureOverrides["passive"] = true
+	// Apply feature overrides from flags
+	featureOverrides := flags.getFeatureMap()
+	if len(featureOverrides) > 0 {
+		// If explicit features were provided, disable all defaults first
+		if !flags.All {
+			cfg.Features.Passive = false
+			cfg.Features.ZoneTransfer = false
+			cfg.Features.HTTPAnalysis = false
+			cfg.Features.DNSBruteForce = false
+			cfg.Features.GeoDNS = false
+			cfg.Features.RDNS = false
+			cfg.Features.CertificateTransparency = false
+			cfg.Features.ARINLookup = false
+			cfg.Features.Persistence = false
+		}
+		// Then apply the overrides
+		cfg.OverrideFeatures(featureOverrides)
 	}
-	if *zoneTransfer {
-		featureOverrides["zone_transfer"] = true
-	}
-	if *httpAnalysis {
-		featureOverrides["http_analysis"] = true
-	}
-	if *dnsBruteForce {
-		featureOverrides["dns_brute_force"] = true
-	}
-	if *geoDNS || *geoAnalysis || *geoLong {
-		featureOverrides["geo_dns"] = true
-	}
-	if *rdns {
-		featureOverrides["rdns"] = true
-	}
-	if *certTransparency {
-		featureOverrides["certificate_transparency"] = true
-	}
-	if *arinLookup {
-		featureOverrides["arin_lookup"] = true
-	}
-	if *persistenceFlag {
-		featureOverrides["persistence"] = true
-	}
-	
-	// Handle legacy --all flag
-	if targetAllPhases {
-		featureOverrides["passive"] = true
-		featureOverrides["zone_transfer"] = true
-		featureOverrides["http_analysis"] = true
-		featureOverrides["dns_brute_force"] = true
-		featureOverrides["geo_dns"] = true
-		featureOverrides["rdns"] = true
-		featureOverrides["certificate_transparency"] = true
-		featureOverrides["arin_lookup"] = true
-		featureOverrides["persistence"] = true
-	}
-	
-	// If specific feature flags were provided, disable all default features first
-	// then enable only the specified ones
-	if len(featureOverrides) > 0 && !targetAllPhases {
-		// Disable all features first
-		cfg.Features.Passive = false
-		cfg.Features.ZoneTransfer = false
-		cfg.Features.HTTPAnalysis = false
-		cfg.Features.DNSBruteForce = false
-		cfg.Features.GeoDNS = false
-		cfg.Features.RDNS = false
-		cfg.Features.CertificateTransparency = false
-		cfg.Features.ARINLookup = false
-		cfg.Features.Persistence = false
-	}
-	
-	// Apply feature overrides
-	cfg.OverrideFeatures(featureOverrides)
 	
 	// Override config with command line flags
-	cfg.Target.Domain = targetDomain
-	cfg.Output.Format = targetFormat
-	cfg.Output.File = targetOutput
-	cfg.Verbose = targetVerbose
-
-	if targetInteractive {
-		fmt.Fprintln(os.Stderr, "Interactive TUI mode not yet implemented")
-		os.Exit(1)
-	}
-
-	subscope := NewSubScope(cfg)
+	cfg.Target.Domain = flags.Domain
+	cfg.Output.Format = flags.Format
+	cfg.Output.File = flags.Output
+	cfg.Verbose = flags.Verbose
 	
+	// Run SubScope
+	subscope := NewSubScope(cfg)
 	ctx := context.Background()
-	if err := subscope.Run(ctx, targetDomain, *inputDomains, *mergeDomains, *showProgress); err != nil {
+	
+	if err := subscope.Run(ctx, flags.Domain, flags.InputDomains, flags.MergeDomains, flags.Progress); err != nil {
 		log.Fatalf("Enumeration failed: %v", err)
 	}
-
+	
 	fmt.Fprintln(os.Stderr, "Enumeration completed successfully")
 }

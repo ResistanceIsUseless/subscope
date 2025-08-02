@@ -78,51 +78,53 @@ SubScope now supports granular control over which enumeration modules to run:
 subscope -d example.com --passive
 
 # Combine specific features
-subscope -d example.com --passive --http-analysis
-subscope -d example.com --passive --geo-dns --rdns
+subscope -d example.com --passive --http
+subscope -d example.com --passive --geo --rdns
 
 # Run DNS brute forcing only
-subscope -d example.com --dns-brute-force
+subscope -d example.com --brute
 
 # Custom security testing workflow
-subscope -d example.com --passive --zone-transfer --cert-transparency
+subscope -d example.com --passive --zone --ct
 ```
 
 ### Flag Options
 
 #### Core Flags
-- `-d, --domain`: Target domain to enumerate
-- `-c, --config`: Configuration file path
-- `-o, --output`: Output file path (default: results.json)
-- `-f, --format`: Output format (json, csv, massdns, dnsx, aquatone, eyewitness)
+- `-d`: Target domain to enumerate (required)
+- `-c`: Configuration file path
+- `-o`: Output file path (default: results.json, use '-' for stdout)
+- `-f`: Output format (json, csv, massdns, dnsx, aquatone, eyewitness)
 
 #### Feature Flags (Modular Control)
-- `--passive`: Enable passive enumeration (subfinder)
-- `--zone-transfer`: Enable DNS zone transfer attempts
-- `--http-analysis`: Enable HTTP/HTTPS analysis (httpx)
-- `--dns-brute-force`: Enable DNS brute forcing (alterx)
-- `--geo-dns`: Enable geographic DNS analysis
-- `--rdns`: Enable reverse DNS lookups
-- `--cert-transparency`: Enable certificate transparency analysis
-- `--arin-lookup`: Enable ARIN organization data lookup
-- `--persistence`: Enable domain history tracking
+- `--passive`: Passive enumeration via subfinder
+- `--zone`: DNS zone transfer attempts
+- `--http`: HTTP/HTTPS analysis via httpx  
+- `--brute`: DNS brute force via alterx
+- `--geo`: Geographic DNS analysis
+- `--rdns`: Reverse DNS lookups
+- `--ct`: Certificate transparency logs
+- `--arin`: ARIN/RDAP organization data
+- `--persist`: Domain history tracking
 
-#### Legacy Modes (Backward Compatible)
-- `-a, --all`: Run all phases (equivalent to enabling all features)
-- `-g, --geo`: Enable geographic DNS analysis (same as --geo-dns)
+#### Control Flags
+- `--all`: Enable all enumeration features
+- `--profile <name>`: Rate limit profile (stealth, normal, aggressive)
+- `-v`: Verbose output
+- `--progress`: Show progress bars
 
-#### Analysis Options
-- `-v, --verbose`: Enable verbose logging
-- `-i, --interactive`: Run in interactive TUI mode (not yet implemented)
-- `--input-domains`: Path to file containing additional domains to scan
-- `--merge`: Merge input domains with discovered domains (default: replace)
-- `--progress`: Show progress indicators for long-running operations
-- `--profile`: Apply rate limit profile (stealth, normal, aggressive)
+#### Input/Output Options
+- `--input <file>`: File containing additional domains
+- `--merge`: Merge input domains with discovered domains
 
-#### Information
-- `-s, --stats`: Show domain history statistics
-- `--new-since`: Show new domains since date (YYYY-MM-DD)
-- `--create-config`: Create default configuration file
+#### Utility Flags
+- `--init`: Create default config file
+- `--stats`: Show domain statistics
+- `--new <date>`: Show new domains since date (YYYY-MM-DD)
+
+#### Legacy Compatibility
+- `-a`: Same as --all (for backward compatibility)
+- `-g`: Same as --geo (for backward compatibility)
 
 ### Feature Selection Logic
 
