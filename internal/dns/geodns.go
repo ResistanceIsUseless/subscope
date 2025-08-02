@@ -158,6 +158,11 @@ func (g *GeoDNSResolver) QueryDomainsFromAllRegions(ctx context.Context, domains
 					domainRegionMap[result.Domain] = make(map[string]enumeration.RegionalDNSInfo)
 				}
 				
+				// Ensure GeoDNS.RegionalRecords is initialized (defensive programming)
+				if allResults[result.Domain].GeoDNS.RegionalRecords == nil {
+					allResults[result.Domain].GeoDNS.RegionalRecords = make(map[string]enumeration.RegionalDNSInfo)
+				}
+				
 				// Collect regional DNS info
 				regionalInfo := enumeration.RegionalDNSInfo{}
 				
