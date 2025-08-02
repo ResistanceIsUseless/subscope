@@ -56,7 +56,7 @@ SubScope supports both short and long flag options following standard Unix conve
 
 ### Basic Enumeration
 ```bash
-# Default optimized pipeline (faster)
+# Default optimized pipeline (passive, zone-transfer, http, rdns)
 subscope -d example.com
 subscope --domain example.com
 
@@ -66,7 +66,26 @@ subscope --domain example.com --all
 
 # Geographic DNS analysis only
 subscope -d example.com -g
-subscope --domain example.com --geo
+subscope -d example.com --geo-dns
+```
+
+### Modular Feature Selection (NEW)
+
+SubScope now supports granular control over which enumeration modules to run:
+
+```bash
+# Run only passive enumeration
+subscope -d example.com --passive
+
+# Combine specific features
+subscope -d example.com --passive --http-analysis
+subscope -d example.com --passive --geo-dns --rdns
+
+# Run DNS brute forcing only
+subscope -d example.com --dns-brute-force
+
+# Custom security testing workflow
+subscope -d example.com --passive --zone-transfer --cert-transparency
 ```
 
 ### Flag Options
@@ -77,13 +96,24 @@ subscope --domain example.com --geo
 - `-o, --output`: Output file path (default: results.json)
 - `-f, --format`: Output format (json, csv, massdns, dnsx, aquatone, eyewitness)
 
-#### Analysis Modes
-- `-a, --all`: Run all phases including CT, AlterX, RDAP, and persistence
-- `-g, --geo`: Enable geographic DNS analysis from multiple regions
+#### Feature Flags (Modular Control)
+- `--passive`: Enable passive enumeration (subfinder)
+- `--zone-transfer`: Enable DNS zone transfer attempts
+- `--http-analysis`: Enable HTTP/HTTPS analysis (httpx)
+- `--dns-brute-force`: Enable DNS brute forcing (alterx)
+- `--geo-dns`: Enable geographic DNS analysis
+- `--rdns`: Enable reverse DNS lookups
+- `--cert-transparency`: Enable certificate transparency analysis
+- `--arin-lookup`: Enable ARIN organization data lookup
+- `--persistence`: Enable domain history tracking
+
+#### Legacy Modes (Backward Compatible)
+- `-a, --all`: Run all phases (equivalent to enabling all features)
+- `-g, --geo`: Enable geographic DNS analysis (same as --geo-dns)
+
+#### Analysis Options
 - `-v, --verbose`: Enable verbose logging
 - `-i, --interactive`: Run in interactive TUI mode (not yet implemented)
-
-#### Input/Output Options
 - `--input-domains`: Path to file containing additional domains to scan
 - `--merge`: Merge input domains with discovered domains (default: replace)
 - `--progress`: Show progress indicators for long-running operations
@@ -93,6 +123,28 @@ subscope --domain example.com --geo
 - `-s, --stats`: Show domain history statistics
 - `--new-since`: Show new domains since date (YYYY-MM-DD)
 - `--create-config`: Create default configuration file
+
+### Feature Selection Logic
+
+**Important**: When using feature flags, SubScope follows these rules:
+1. If no feature flags are specified, default features are used (passive, zone-transfer, http-analysis, rdns)
+2. If any feature flags are specified, ONLY those features are enabled
+3. The `-a/--all` flag overrides everything and enables all features
+
+Examples:
+```bash
+# Uses defaults (passive, zone-transfer, http-analysis, rdns)
+subscope -d example.com
+
+# Only runs passive enumeration
+subscope -d example.com --passive
+
+# Only runs passive + geographic DNS
+subscope -d example.com --passive --geo-dns
+
+# Runs everything
+subscope -d example.com -a
+```
 
 ### Output Formats
 ```bash
@@ -297,6 +349,209 @@ SubScope now organizes results into three distinct categories for better clarity
 - `rdns`: Reverse DNS lookup
 - `rdns_range`: IP range scanning for reverse DNS
 - `geodns`: Geographic DNS resolution differences
+
+## Output Parsing & Tool Chaining
+
+SubScope provides multiple output formats and easy parsing options for integrating with other tools in your workflow.
+
+### Quick Parsing Examples
+
+#### Extract All Resolved Domains
+```bash
+# Using jq (recommended for JSON)
+subscope -d example.com -o results.json
+cat results.json | jq -r '.resolved_domains[].domain' > domains.txt
+
+# One-liner
+subscope -d example.com -o - | jq -r '.resolved_domains[].domain'
+```
+
+#### Extract All IP Addresses
+```bash
+# Extract all A records
+cat results.json | jq -r '.resolved_domains[].dns_records.A' | grep -v null > ips.txt
+
+# Extract all IPs including multiple A records
+cat results.json | jq -r '.resolved_domains[].dns_records.A_ALL' | grep -v null | tr ',' '\n' | sort -u > all_ips.txt
+
+# Extract IPs with their domains
+cat results.json | jq -r '.resolved_domains[] | select(.dns_records.A != null) | "\(.domain),\(.dns_records.A)"' > domain_ip_mapping.csv
+```
+
+#### Filter by Source
+```bash
+# Get only domains from passive enumeration
+cat results.json | jq -r '.resolved_domains[] | select(.source == "subfinder") | .domain'
+
+# Get domains discovered by HTTP analysis
+cat results.json | jq -r '.resolved_domains[] | select(.source == "httpx") | .domain'
+
+# Get domains from geographic DNS
+cat results.json | jq -r '.resolved_domains[] | select(.source == "geodns") | .domain'
+```
+
+#### Filter by Cloud Provider
+```bash
+# Get all AWS-hosted domains
+cat results.json | jq -r '.resolved_domains[] | select(.dns_records.CLOUD_SERVICE != null and (.dns_records.CLOUD_SERVICE | contains("AWS"))) | .domain'
+
+# Get all Cloudflare domains
+cat results.json | jq -r '.resolved_domains[] | select(.dns_records.CLOUD_SERVICE == "Cloudflare") | .domain'
+
+# Export cloud services mapping
+cat results.json | jq -r '.resolved_domains[] | select(.dns_records.CLOUD_SERVICE != null) | "\(.domain),\(.dns_records.CLOUD_SERVICE)"' > cloud_services.csv
+```
+
+### Tool Chaining Examples
+
+#### Send to Nuclei for Vulnerability Scanning
+```bash
+# All resolved domains
+subscope -d example.com -o - | jq -r '.resolved_domains[].domain' | nuclei -silent
+
+# Only cloud-hosted domains (higher priority targets)
+subscope -d example.com -o - | jq -r '.resolved_domains[] | select(.dns_records.CLOUD_SERVICE != null) | .domain' | nuclei -tags cloud -silent
+```
+
+#### Send to httpx for HTTP Probing
+```bash
+# Probe all domains (SubScope already did basic HTTP analysis)
+subscope -d example.com -o - | jq -r '.resolved_domains[].domain' | httpx -title -tech-detect -status-code
+
+# Probe only newly discovered domains
+subscope -d example.com --new-since 2024-01-01 -o - | jq -r '.resolved_domains[].domain' | httpx -screenshot
+```
+
+#### Send to nmap for Port Scanning
+```bash
+# Scan all unique IPs
+subscope -d example.com -o - | jq -r '.resolved_domains[].dns_records.A' | grep -v null | sort -u | nmap -iL - -Pn -sV
+
+# Scan specific cloud provider IPs
+subscope -d example.com -o - | jq -r '.resolved_domains[] | select(.dns_records.CLOUD_SERVICE | contains("AWS")) | .dns_records.A' | grep -v null | sort -u > aws_ips.txt
+nmap -iL aws_ips.txt -p 80,443,8080,8443 -sV
+```
+
+#### Send to waybackurls for Historical Data
+```bash
+# Get historical URLs for all domains
+subscope -d example.com -o - | jq -r '.resolved_domains[].domain' | waybackurls
+
+# Focus on API endpoints
+subscope -d example.com -o - | jq -r '.resolved_domains[] | select(.domain | contains("api")) | .domain' | waybackurls | grep -E '\.json|api/v'
+```
+
+### Alternative Output Formats
+
+#### CSV Format (-f csv)
+```bash
+subscope -d example.com -f csv -o results.csv
+# Columns: domain,ip,source,cloud_service,dns_provider,first_seen
+
+# Parse with standard tools
+cut -d',' -f1 results.csv | tail -n +2 > domains.txt  # domains only
+cut -d',' -f2 results.csv | tail -n +2 | sort -u > ips.txt  # IPs only
+```
+
+#### Aquatone Format (-f aquatone)
+```bash
+# Direct pipe to aquatone
+subscope -d example.com -f aquatone -o - | aquatone
+
+# Save for later
+subscope -d example.com -f aquatone -o aquatone_urls.txt
+cat aquatone_urls.txt | aquatone -out aquatone_results
+```
+
+#### massdns Format (-f massdns)
+```bash
+# Use for further DNS enumeration
+subscope -d example.com -f massdns -o massdns_input.txt
+massdns -r resolvers.txt -o S massdns_input.txt
+```
+
+#### dnsx Format (-f dnsx)
+```bash
+# Chain with dnsx for additional DNS queries
+subscope -d example.com -f dnsx -o - | dnsx -a -aaaa -cname -mx -txt -resp
+```
+
+### Advanced Parsing Techniques
+
+#### Geographic DNS Analysis Results
+```bash
+# Extract domains found only in specific regions
+cat results.json | jq -r '.resolved_domains[] | select(.geodns != null and (.geodns.found_in_regions | contains(["Europe-West"]))) | .domain'
+
+# Find geo-distributed domains (found in all regions)
+cat results.json | jq -r '.resolved_domains[] | select(.geodns != null and (.geodns.found_in_regions | length) >= 6) | .domain'
+
+# Extract region-specific IPs
+cat results.json | jq -r '.resolved_domains[] | select(.geodns != null) | .geodns.regional_records | to_entries[] | "\(.key),\(.value.a[])"' 2>/dev/null | grep -v null
+```
+
+#### Monitoring & Alerting
+```bash
+# Check for new domains since last scan
+subscope -d example.com --new-since $(date -d '1 week ago' +%Y-%m-%d) -o - | jq -r '.resolved_domains[].domain' | while read domain; do
+    echo "ALERT: New subdomain discovered: $domain"
+    # Send to Slack, email, etc.
+done
+
+# Monitor specific patterns
+subscope -d example.com -o - | jq -r '.resolved_domains[] | select(.domain | test("dev|test|staging")) | .domain' > dev_environments.txt
+```
+
+#### Combine Multiple Scans
+```bash
+# Merge results from multiple domains
+for domain in example.com example.org example.net; do
+    subscope -d $domain -o ${domain}_results.json
+done
+jq -s '.[0].resolved_domains + .[1].resolved_domains + .[2].resolved_domains | unique_by(.domain)' *_results.json > combined.json
+```
+
+### Performance Tips
+
+1. **Use streaming (`-o -`)** to pipe directly to other tools without writing to disk
+2. **Pre-filter with jq** before sending to slow tools like nmap
+3. **Use parallel processing** for multiple domains:
+   ```bash
+   cat domains.txt | parallel -j 5 'subscope -d {} -o {}_results.json'
+   ```
+4. **Cache results** and use `--new-since` for incremental scans
+
+### Common Use Cases
+
+#### Bug Bounty Workflow
+```bash
+# Initial recon
+subscope -d target.com -a -o target_full.json
+
+# Extract high-value targets
+cat target_full.json | jq -r '.resolved_domains[] | select(.domain | test("api|admin|internal|dev")) | .domain' > priority_targets.txt
+
+# Scan priority targets
+cat priority_targets.txt | nuclei -t exposures,misconfigurations -silent
+```
+
+#### Security Monitoring
+```bash
+# Daily subdomain monitoring
+subscope -d company.com --persistence -o daily_scan.json
+
+# Alert on new domains
+subscope -d company.com --new-since $(date -d yesterday +%Y-%m-%d) -o - | jq -r '.resolved_domains[].domain' | mail -s "New Subdomains Found" security@company.com
+```
+
+#### Infrastructure Mapping
+```bash
+# Map cloud infrastructure
+subscope -d company.com -o - | jq -r '.resolved_domains[] | select(.dns_records.CLOUD_SERVICE != null) | [.domain, .dns_records.CLOUD_SERVICE, .dns_records.A] | @csv' > cloud_infrastructure.csv
+
+# Identify CDN endpoints
+subscope -d company.com -o - | jq -r '.resolved_domains[] | select(.dns_records.CLOUD_SERVICE | test("CloudFront|Cloudflare|Akamai|Fastly")) | .domain' > cdn_endpoints.txt
+```
 
 ## Advanced Features
 
