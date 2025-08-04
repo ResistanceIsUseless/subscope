@@ -501,7 +501,7 @@ subscope -d example.com --new-since $(date -d '1 week ago' +%Y-%m-%d) -o - | jq 
 done
 
 # Monitor specific patterns
-subscope -d example.com -o - | jq -r '.resolved_domains[] | select(.domain | test("dev|test|staging")) | .domain' > dev_environments.txt
+subscope -d example.com -o - | jq -r '.resolved_domains[] | select(.domain | test("qa|dev|test|staging")) | .domain' > dev_environments.txt
 ```
 
 #### Combine Multiple Scans

@@ -116,103 +116,59 @@ func (g *GeoDNSResolver) QueryFromAllRegions(ctx context.Context, domain string)
 	return results, nil
 }
 
-// QueryDomainsFromAllRegions queries multiple domains and returns enriched results with GeoDNS details
-func (g *GeoDNSResolver) QueryDomainsFromAllRegions(ctx context.Context, domains []string) ([]enumeration.DomainResult, error) {
-	// Return early if no domains provided
+// QueryDomainsFromAllRegionsEnhanced performs enhanced geographic analysis with round-robin detection
+func (g *GeoDNSResolver) QueryDomainsFromAllRegionsEnhanced(ctx context.Context, domains []string) ([]enumeration.DomainResult, error) {
 	if len(domains) == 0 {
 		return []enumeration.DomainResult{}, nil
 	}
 	
-	// Map to track all results by domain
-	domainRegionMap := make(map[string]map[string]enumeration.RegionalDNSInfo)
-	allResults := make(map[string]*enumeration.DomainResult)
+	var finalResults []enumeration.DomainResult
 	
 	for _, domain := range domains {
-		domainRegionMap[domain] = make(map[string]enumeration.RegionalDNSInfo)
+		if g.config.Verbose {
+			fmt.Printf("Processing %s with enhanced GeoDNS analysis...\n", domain)
+		}
 		
-		// Query from all regions
+		// Step 1: Establish round-robin baseline
+		baseline, err := g.detectRoundRobin(ctx, domain)
+		if err != nil {
+			if g.config.Verbose {
+				fmt.Printf("Failed to establish baseline for %s: %v\n", domain, err)
+			}
+			continue
+		}
+		
+		// Step 2: Query from all geographic regions
 		regionResults, err := g.QueryFromAllRegions(ctx, domain)
 		if err != nil {
 			continue
 		}
 		
-		// Process results from each region
-		for region, results := range regionResults {
-			for _, result := range results {
-				// Create or update the domain result
-				if _, exists := allResults[result.Domain]; !exists {
-					allResults[result.Domain] = &enumeration.DomainResult{
-						Domain:     result.Domain,
-						Status:     result.Status,
-						Source:     "geodns",
-						Timestamp:  result.Timestamp,
-						DNSRecords: make(map[string]string),
-						GeoDNS:     &enumeration.GeoDNSDetails{
-							RegionalRecords: make(map[string]enumeration.RegionalDNSInfo),
-						},
-					}
-				}
-				
-				// Ensure domainRegionMap is initialized for this domain
-				if _, exists := domainRegionMap[result.Domain]; !exists {
-					domainRegionMap[result.Domain] = make(map[string]enumeration.RegionalDNSInfo)
-				}
-				
-				// Ensure GeoDNS.RegionalRecords is initialized (defensive programming)
-				if allResults[result.Domain].GeoDNS.RegionalRecords == nil {
-					allResults[result.Domain].GeoDNS.RegionalRecords = make(map[string]enumeration.RegionalDNSInfo)
-				}
-				
-				// Collect regional DNS info
-				regionalInfo := enumeration.RegionalDNSInfo{}
-				
-				// Extract A records
-				if aRecord, exists := result.DNSRecords["A"]; exists {
-					regionalInfo.A = []string{aRecord}
-				}
-				
-				// Extract CNAME
-				if cname, exists := result.DNSRecords["CNAME"]; exists {
-					regionalInfo.CNAME = cname
-				}
-				
-				// Extract cloud service
-				if cloudService, exists := result.DNSRecords["CLOUD_SERVICE"]; exists {
-					regionalInfo.CloudService = cloudService
-				}
-				
-				// Store regional info
-				allResults[result.Domain].GeoDNS.RegionalRecords[region] = regionalInfo
-				domainRegionMap[result.Domain][region] = regionalInfo
-			}
-		}
-	}
-	
-	// Analyze which regions found each domain
-	for _, result := range allResults {
-		foundRegions := make([]string, 0)
-		missingRegions := make([]string, 0)
+		// Step 3: Analyze with baseline filtering
+		analysis := g.analyzeWithBaseline(domain, regionResults, baseline)
 		
-		for _, region := range g.regions {
-			if _, found := result.GeoDNS.RegionalRecords[region.Name]; found {
-				foundRegions = append(foundRegions, region.Name)
-			} else {
-				missingRegions = append(missingRegions, region.Name)
+		// Only include results that have meaningful geographic differences or useful data
+		if analysis.HasMeaningfulResults() {
+			result := enumeration.DomainResult{
+				Domain:     domain,
+				Status:     "resolved",
+				Source:     "geodns",
+				Timestamp:  time.Now(),
+				DNSRecords: make(map[string]string),
+				GeoDNS:     analysis.ToGeoDNSDetails(),
 			}
+			
+			finalResults = append(finalResults, result)
 		}
-		
-		result.GeoDNS.FoundInRegions = foundRegions
-		result.GeoDNS.MissingInRegions = missingRegions
-		result.GeoDNS.IsGeographic = len(missingRegions) > 0
-	}
-	
-	// Convert map to slice
-	var finalResults []enumeration.DomainResult
-	for _, result := range allResults {
-		finalResults = append(finalResults, *result)
 	}
 	
 	return finalResults, nil
+}
+
+// QueryDomainsFromAllRegions queries multiple domains and returns enriched results with GeoDNS details (legacy method)
+func (g *GeoDNSResolver) QueryDomainsFromAllRegions(ctx context.Context, domains []string) ([]enumeration.DomainResult, error) {
+	// Use enhanced algorithm by default
+	return g.QueryDomainsFromAllRegionsEnhanced(ctx, domains)
 }
 
 // queryFromRegion performs DNS queries simulating requests from a specific region
@@ -433,4 +389,297 @@ func (a *GeoDNSAnalysis) PrintAnalysis() {
 	}
 	
 	fmt.Println(strings.Repeat("=", 60))
+}
+
+// detectRoundRobin performs multiple DNS queries from baseline region to establish round-robin patterns
+func (g *GeoDNSResolver) detectRoundRobin(ctx context.Context, domain string) (*enumeration.RoundRobinBaseline, error) {
+	baseline := &enumeration.RoundRobinBaseline{
+		Domain:         domain,
+		AllIPs:         []string{},
+		IPFrequency:    make(map[string]int),
+		StableIPSet:    make(map[string]bool),
+		BaselineRegion: "US-East", // Use US-East as baseline
+		QueryCount:     6,
+	}
+	
+	// Use US-East (4.2.2.2) as baseline region for consistent testing
+	baselineClientIP := "4.2.2.2"
+	
+	if g.config.Verbose {
+		fmt.Printf("Establishing round-robin baseline for %s from %s...\n", domain, baseline.BaselineRegion)
+	}
+	
+	// Perform multiple queries with delays to detect rotation
+	for i := 0; i < baseline.QueryCount; i++ {
+		results, err := g.queryGoogleDNS(ctx, domain, "A", baselineClientIP)
+		if err != nil {
+			if g.config.Verbose {
+				fmt.Printf("Baseline query %d failed for %s: %v\n", i+1, domain, err)
+			}
+			continue
+		}
+		
+		for _, result := range results {
+			if ip, exists := result.DNSRecords["A"]; exists {
+				baseline.IPFrequency[ip]++
+				if !contains(baseline.AllIPs, ip) {
+					baseline.AllIPs = append(baseline.AllIPs, ip)
+				}
+			}
+		}
+		
+		// Add delay between queries to catch rotation
+		if i < baseline.QueryCount-1 {
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+	
+	// Analyze if round-robin is detected
+	if len(baseline.IPFrequency) > 1 && len(baseline.AllIPs) >= 2 {
+		baseline.IsRoundRobin = true
+		
+		// Mark IPs that appeared in most queries as "stable" (part of round-robin set)
+		threshold := baseline.QueryCount / 3 // Appear in at least 1/3 of queries
+		for ip, frequency := range baseline.IPFrequency {
+			if frequency >= threshold {
+				baseline.StableIPSet[ip] = true
+			}
+		}
+		
+		if g.config.Verbose {
+			fmt.Printf("Round-robin detected for %s: %d unique IPs across %d queries\n", 
+				domain, len(baseline.AllIPs), baseline.QueryCount)
+		}
+	} else if g.config.Verbose {
+		fmt.Printf("No round-robin detected for %s: %d unique IPs\n", domain, len(baseline.AllIPs))
+	}
+	
+	return baseline, nil
+}
+
+// EnhancedGeoDNSAnalysis contains the results of enhanced geographic analysis
+type EnhancedGeoDNSAnalysis struct {
+	Domain                    string
+	RoundRobinBaseline       *enumeration.RoundRobinBaseline
+	RegionalData             map[string]RegionalAnalysis
+	IdenticalRecords         *enumeration.IdenticalRecordInfo
+	HasTrueGeographicRouting bool
+	UniqueIPs                []string
+	FilteredUniqueIPs        []string
+}
+
+type RegionalAnalysis struct {
+	Region           string
+	A                []string
+	CNAME            string
+	CloudService     string
+	IsUnique         bool   // True if different from other regions
+	IsBaselineFiltered bool // True if this data was filtered out as baseline
+}
+
+// analyzeWithBaseline performs enhanced geographic analysis with baseline filtering
+func (g *GeoDNSResolver) analyzeWithBaseline(domain string, regionResults map[string][]enumeration.DomainResult, baseline *enumeration.RoundRobinBaseline) *EnhancedGeoDNSAnalysis {
+	analysis := &EnhancedGeoDNSAnalysis{
+		Domain:             domain,
+		RoundRobinBaseline: baseline,
+		RegionalData:       make(map[string]RegionalAnalysis),
+		UniqueIPs:          []string{},
+		FilteredUniqueIPs:  []string{},
+	}
+	
+	// Collect all regional data
+	allRegionalRecords := make(map[string]enumeration.RegionalDNSInfo)
+	
+	for _, region := range g.regions {
+		regionName := region.Name
+		results, hasResults := regionResults[regionName]
+		
+		if !hasResults {
+			continue
+		}
+		
+		regionalAnalysis := RegionalAnalysis{Region: regionName}
+		
+		// Process each result from this region
+		for _, result := range results {
+			if ip, exists := result.DNSRecords["A"]; exists {
+				regionalAnalysis.A = append(regionalAnalysis.A, ip)
+				
+				// Add to unique IPs list if not already present
+				if !contains(analysis.UniqueIPs, ip) {
+					analysis.UniqueIPs = append(analysis.UniqueIPs, ip)
+				}
+				
+				// Add to filtered list if not in baseline round-robin set
+				if !baseline.IsRoundRobin || !baseline.StableIPSet[ip] {
+					if !contains(analysis.FilteredUniqueIPs, ip) {
+						analysis.FilteredUniqueIPs = append(analysis.FilteredUniqueIPs, ip)
+					}
+					regionalAnalysis.IsUnique = true
+					analysis.HasTrueGeographicRouting = true
+				} else {
+					regionalAnalysis.IsBaselineFiltered = true
+				}
+			}
+			
+			if cname, exists := result.DNSRecords["CNAME"]; exists {
+				regionalAnalysis.CNAME = cname
+			}
+			
+			if cloudService, exists := result.DNSRecords["CLOUD_SERVICE"]; exists {
+				regionalAnalysis.CloudService = cloudService
+			}
+		}
+		
+		analysis.RegionalData[regionName] = regionalAnalysis
+		
+		// Create regional record for legacy compatibility
+		regionalInfo := enumeration.RegionalDNSInfo{
+			A:            regionalAnalysis.A,
+			CNAME:        regionalAnalysis.CNAME,
+			CloudService: regionalAnalysis.CloudService,
+		}
+		allRegionalRecords[regionName] = regionalInfo
+	}
+	
+	// Determine if records are identical across regions
+	analysis.detectIdenticalRecords(allRegionalRecords)
+	
+	return analysis
+}
+
+// detectIdenticalRecords identifies records that are identical across all regions
+func (analysis *EnhancedGeoDNSAnalysis) detectIdenticalRecords(allRegionalRecords map[string]enumeration.RegionalDNSInfo) {
+	if len(allRegionalRecords) == 0 {
+		return
+	}
+	
+	// Get first region's records as baseline for comparison
+	var firstRecord enumeration.RegionalDNSInfo
+	for _, record := range allRegionalRecords {
+		firstRecord = record
+		break
+	}
+	
+	// Check if all regions have identical records
+	isIdentical := true
+	var regions []string
+	
+	for region, record := range allRegionalRecords {
+		regions = append(regions, region)
+		
+		// Compare A records
+		if !stringSlicesEqual(record.A, firstRecord.A) {
+			isIdentical = false
+		}
+		
+		// Compare CNAME
+		if record.CNAME != firstRecord.CNAME {
+			isIdentical = false
+		}
+		
+		// Compare cloud service
+		if record.CloudService != firstRecord.CloudService {
+			isIdentical = false
+		}
+	}
+	
+	// If all records are identical, store in IdenticalRecords
+	if isIdentical && len(regions) > 1 {
+		analysis.IdenticalRecords = &enumeration.IdenticalRecordInfo{
+			A:            firstRecord.A,
+			CNAME:        firstRecord.CNAME,
+			CloudService: firstRecord.CloudService,
+			Regions:      regions,
+		}
+	}
+}
+
+// HasMeaningfulResults determines if the analysis contains meaningful geographic differences
+func (analysis *EnhancedGeoDNSAnalysis) HasMeaningfulResults() bool {
+	// Include if there are true geographic differences
+	if analysis.HasTrueGeographicRouting {
+		return true
+	}
+	
+	// Include if round-robin was detected (useful information)
+	if analysis.RoundRobinBaseline.IsRoundRobin {
+		return true
+	}
+	
+	// Include if there are multiple unique IPs (even if they're all round-robin)
+	if len(analysis.UniqueIPs) > 1 {
+		return true
+	}
+	
+	// Skip if only identical records across all regions with single IP
+	return false
+}
+
+// ToGeoDNSDetails converts analysis to GeoDNSDetails format
+func (analysis *EnhancedGeoDNSAnalysis) ToGeoDNSDetails() *enumeration.GeoDNSDetails {
+	details := &enumeration.GeoDNSDetails{
+		// Enhanced fields
+		RoundRobinDetected:     analysis.RoundRobinBaseline.IsRoundRobin,
+		BaselineIPs:            analysis.RoundRobinBaseline.AllIPs,
+		BaselineRegion:         analysis.RoundRobinBaseline.BaselineRegion,
+		IsGeographic:           analysis.HasTrueGeographicRouting,
+		HasRegionalDifferences: len(analysis.FilteredUniqueIPs) > 0,
+		UniqueIPs:              analysis.UniqueIPs,
+		FilteredUniqueIPs:      analysis.FilteredUniqueIPs,
+		RegionsWithDifferences: len(analysis.RegionalData),
+		IdenticalAcrossRegions: analysis.IdenticalRecords,
+		
+		// Only include unique regional records (not identical ones)
+		UniqueRegionalRecords: make(map[string]enumeration.RegionalDNSInfo),
+		
+		// Legacy fields for backward compatibility
+		RegionalRecords:  make(map[string]enumeration.RegionalDNSInfo),
+		FoundInRegions:   []string{},
+		MissingInRegions: []string{},
+	}
+	
+	// Populate unique regional records (only regions with differences)
+	for region, regionalAnalysis := range analysis.RegionalData {
+		if regionalAnalysis.IsUnique {
+			details.UniqueRegionalRecords[region] = enumeration.RegionalDNSInfo{
+				A:            regionalAnalysis.A,
+				CNAME:        regionalAnalysis.CNAME,
+				CloudService: regionalAnalysis.CloudService,
+			}
+		}
+		
+		// Legacy compatibility - include all regional records
+		details.RegionalRecords[region] = enumeration.RegionalDNSInfo{
+			A:            regionalAnalysis.A,
+			CNAME:        regionalAnalysis.CNAME,
+			CloudService: regionalAnalysis.CloudService,
+		}
+		details.FoundInRegions = append(details.FoundInRegions, region)
+	}
+	
+	return details
+}
+
+// Helper functions
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
+}
+
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	
+	for i, v := range a {
+		if v != b[i] {
+			return false
+		}
+	}
+	return true
 }

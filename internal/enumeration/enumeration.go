@@ -27,12 +27,28 @@ type DomainResult struct {
 	GeoDNS     *GeoDNSDetails    `json:"geodns,omitempty"`
 }
 
-// GeoDNSDetails contains geographic DNS analysis information
+// GeoDNSDetails contains enhanced geographic DNS analysis information
 type GeoDNSDetails struct {
+	// Round-robin detection results
+	RoundRobinDetected bool     `json:"round_robin_detected"`
+	BaselineIPs        []string `json:"baseline_ips,omitempty"`
+	BaselineRegion     string   `json:"baseline_region,omitempty"`
+	
+	// Geographic analysis results
+	IsGeographic           bool                        `json:"is_geographic"`
+	HasRegionalDifferences bool                        `json:"has_regional_differences"`
+	UniqueRegionalRecords  map[string]RegionalDNSInfo  `json:"unique_regional_records,omitempty"`
+	IdenticalAcrossRegions *IdenticalRecordInfo        `json:"identical_across_regions,omitempty"`
+	
+	// Tool-chaining friendly outputs
+	UniqueIPs              []string `json:"unique_ips,omitempty"`
+	FilteredUniqueIPs      []string `json:"filtered_unique_ips,omitempty"` // Excludes baseline round-robin IPs
+	RegionsWithDifferences int      `json:"regions_with_differences"`
+	
+	// Legacy fields for backward compatibility (deprecated)
 	FoundInRegions   []string                   `json:"found_in_regions,omitempty"`
 	MissingInRegions []string                   `json:"missing_in_regions,omitempty"`
 	RegionalRecords  map[string]RegionalDNSInfo `json:"regional_records,omitempty"`
-	IsGeographic     bool                       `json:"is_geographic"`
 }
 
 // RegionalDNSInfo contains DNS records specific to a region
@@ -40,6 +56,25 @@ type RegionalDNSInfo struct {
 	A            []string `json:"a,omitempty"`
 	CNAME        string   `json:"cname,omitempty"`
 	CloudService string   `json:"cloud_service,omitempty"`
+}
+
+// IdenticalRecordInfo contains records that are identical across all regions
+type IdenticalRecordInfo struct {
+	A            []string `json:"a,omitempty"`
+	CNAME        string   `json:"cname,omitempty"`
+	CloudService string   `json:"cloud_service,omitempty"`
+	Regions      []string `json:"regions"`
+}
+
+// RoundRobinBaseline contains results from baseline round-robin detection
+type RoundRobinBaseline struct {
+	Domain         string         `json:"domain"`
+	AllIPs         []string       `json:"all_ips"`
+	IPFrequency    map[string]int `json:"ip_frequency"`
+	IsRoundRobin   bool           `json:"is_round_robin"`
+	StableIPSet    map[string]bool `json:"stable_ip_set"`
+	BaselineRegion string         `json:"baseline_region"`
+	QueryCount     int            `json:"query_count"`
 }
 
 func New(config *config.Config) *Enumerator {
