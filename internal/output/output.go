@@ -12,6 +12,14 @@ import (
 	"github.com/resistanceisuseless/subscope/internal/enumeration"
 )
 
+// Version is the current version - should match cmd/subscope/version.go
+const Version = "1.0.0"
+
+// getVersion returns the current version
+func getVersion() string {
+	return Version
+}
+
 type EnumerationResult struct {
 	Metadata          Metadata                   `json:"metadata"`
 	Statistics        Statistics                 `json:"statistics"`
@@ -98,7 +106,7 @@ func (w *Writer) WriteResults(results []enumeration.DomainResult) error {
 			Timestamp: time.Now(),
 			Tool: ToolInfo{
 				Name:    "SubScope",
-				Version: "0.1.0",
+				Version: getVersion(),
 			},
 			Target:   w.config.Target.Domain,
 			ScanType: "passive+zone_transfer+httpx+rdns+geodns+resolution",

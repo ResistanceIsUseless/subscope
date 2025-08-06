@@ -347,6 +347,11 @@ func main() {
 	flags := parseFlags()
 	
 	// Handle utility commands first
+	if flags.ShowVersion {
+		fmt.Println("SubScope", GetVersionInfo())
+		os.Exit(0)
+	}
+	
 	if flags.CreateConfig {
 		if err := config.CreateDefault(); err != nil {
 			log.Fatalf("Failed to create default config: %v", err)

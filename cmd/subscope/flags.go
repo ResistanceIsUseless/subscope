@@ -39,6 +39,7 @@ type Flags struct {
 	CreateConfig bool
 	ShowStats    bool
 	NewSince     string
+	ShowVersion  bool
 }
 
 // ShowUsage displays the usage information
@@ -52,96 +53,127 @@ func parseFlags() *Flags {
 	// Custom usage function
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, `SubScope - Advanced Subdomain Enumeration Tool
+Version: %s
 
 Usage:
-  subscope -d <domain> [options]
+  subscope [flags]
 
 Examples:
-  # Default scan (passive + zone-transfer + http + rdns)
   subscope -d example.com
-
-  # Specific features only
-  subscope -d example.com --passive --geo
-  
-  # All features enabled
+  subscope -d example.com --passive --geo  
   subscope -d example.com --all
-  
-  # Stealth mode with custom output
   subscope -d example.com --profile stealth -o results.json
 
-Options:
-`)
-		flag.PrintDefaults()
+Flags:`, GetVersionInfo())
 		fmt.Fprintf(os.Stderr, `
-Feature Selection:
-  When no feature flags are specified, the default set is used:
-  passive, zone-transfer, http, and rdns.
-  
-  When any feature flags are specified, ONLY those features run.
-  The --all flag overrides this and enables everything.
+TARGET:
+   -d, --domain string    target domain to enumerate (required)
 
-Output Formats:
-  json       Detailed JSON with DNS records and metadata (default)
-  csv        Simple CSV format (domain,ip,source,cloud,dns)
-  aquatone   URLs for Aquatone screenshots
-  massdns    Format for massdns input
-  dnsx       Format for dnsx input
-  eyewitness Format for EyeWitness input
+INPUT:
+   -c, --config string    configuration file path
+   -i, --input string     file containing additional domains to scan
+   -m, --merge            merge input domains with discovered domains
 
-Profiles:
-  stealth     Low rate limits (5 req/s), high delays
-  normal      Balanced settings (20 req/s) [default]
-  aggressive  Maximum speed (100 req/s), no delays
+OUTPUT:
+   -o, --output string    output file path (default "results.json", use "-" for stdout) 
+   -f, --format string    output format (json,csv,massdns,dnsx,aquatone,eyewitness) (default "json")
+
+ENUMERATION:
+   -p, --passive          passive enumeration via subfinder
+   -z, --zone             DNS zone transfer attempts  
+   -h, --http             HTTP/HTTPS analysis via httpx
+   -b, --brute            DNS brute force via alterx
+   -g, --geo              geographic DNS analysis
+   -r, --rdns             reverse DNS lookups
+   --ct                   certificate transparency logs
+   --arin                 ARIN/RDAP organization data
+   --persist              domain history tracking
+
+CONTROL:
+   -a, --all              enable all enumeration features
+   --profile string       rate limit profile (stealth,normal,aggressive)
+   -v, --verbose          verbose output
+   --progress             show progress bars
+
+UTILITY:
+   --init                 create default config file
+   -s, --stats            show domain statistics  
+   -n, --new string       show new domains since date (YYYY-MM-DD)
+   --version              show version information
+
+FEATURE SELECTION:
+  Default features (when no flags specified): passive, zone, http, rdns
+  Explicit features: when any feature flag is used, ONLY those features run
+  Override: --all enables everything regardless of other flags
+
+OUTPUT FORMATS:
+  json       detailed JSON with DNS records and metadata (default)
+  csv        simple CSV format (domain,ip,source,cloud,dns)
+  aquatone   URLs for aquatone screenshots
+  massdns    format for massdns input
+  dnsx       format for dnsx input  
+  eyewitness format for eyewitness input
+
+RATE LIMIT PROFILES:
+  stealth     low rate limits (5 req/s), high delays
+  normal      balanced settings (20 req/s) [default]
+  aggressive  maximum speed (100 req/s), no delays
+
 `)
 	}
 	
-	// Required flags
-	flag.StringVar(&f.Domain, "d", "", "Target domain to enumerate (required)")
+	// Target flags
+	flag.StringVar(&f.Domain, "d", "", "")
+	flag.StringVar(&f.Domain, "domain", "", "")
 	
-	// Input/Output flags
-	flag.StringVar(&f.Config, "c", "", "Configuration file path")
-	flag.StringVar(&f.Output, "o", "results.json", "Output file path (use '-' for stdout)")
-	flag.StringVar(&f.Format, "f", "json", "Output format")
-	flag.StringVar(&f.InputDomains, "input", "", "File containing additional domains")
-	flag.BoolVar(&f.MergeDomains, "merge", false, "Merge input domains with discovered")
+	// Input flags  
+	flag.StringVar(&f.Config, "c", "", "")
+	flag.StringVar(&f.Config, "config", "", "")
+	flag.StringVar(&f.InputDomains, "i", "", "")
+	flag.StringVar(&f.InputDomains, "input", "", "")
+	flag.BoolVar(&f.MergeDomains, "m", false, "")
+	flag.BoolVar(&f.MergeDomains, "merge", false, "")
 	
-	// Feature flags
-	flag.BoolVar(&f.Passive, "passive", false, "Passive enumeration via subfinder")
-	flag.BoolVar(&f.ZoneTransfer, "zone", false, "DNS zone transfer attempts")
-	flag.BoolVar(&f.HTTPAnalysis, "http", false, "HTTP/HTTPS analysis via httpx")
-	flag.BoolVar(&f.DNSBruteForce, "brute", false, "DNS brute force via alterx")
-	flag.BoolVar(&f.GeoDNS, "geo", false, "Geographic DNS analysis")
-	flag.BoolVar(&f.RDNS, "rdns", false, "Reverse DNS lookups")
-	flag.BoolVar(&f.CertTransparency, "ct", false, "Certificate transparency logs")
-	flag.BoolVar(&f.ARINLookup, "arin", false, "ARIN/RDAP organization data")
-	flag.BoolVar(&f.Persistence, "persist", false, "Domain history tracking")
+	// Output flags
+	flag.StringVar(&f.Output, "o", "results.json", "")
+	flag.StringVar(&f.Output, "output", "results.json", "")
+	flag.StringVar(&f.Format, "f", "json", "")
+	flag.StringVar(&f.Format, "format", "json", "")
+	
+	// Enumeration feature flags
+	flag.BoolVar(&f.Passive, "p", false, "")
+	flag.BoolVar(&f.Passive, "passive", false, "")
+	flag.BoolVar(&f.ZoneTransfer, "z", false, "")
+	flag.BoolVar(&f.ZoneTransfer, "zone", false, "")
+	flag.BoolVar(&f.HTTPAnalysis, "h", false, "")
+	flag.BoolVar(&f.HTTPAnalysis, "http", false, "")
+	flag.BoolVar(&f.DNSBruteForce, "b", false, "")
+	flag.BoolVar(&f.DNSBruteForce, "brute", false, "")
+	flag.BoolVar(&f.GeoDNS, "g", false, "")
+	flag.BoolVar(&f.GeoDNS, "geo", false, "")
+	flag.BoolVar(&f.RDNS, "r", false, "")
+	flag.BoolVar(&f.RDNS, "rdns", false, "")
+	flag.BoolVar(&f.CertTransparency, "ct", false, "")
+	flag.BoolVar(&f.ARINLookup, "arin", false, "")
+	flag.BoolVar(&f.Persistence, "persist", false, "")
 	
 	// Control flags
-	flag.BoolVar(&f.All, "all", false, "Enable all enumeration features")
-	flag.StringVar(&f.Profile, "profile", "", "Rate limit profile")
-	flag.BoolVar(&f.Verbose, "v", false, "Verbose output")
-	flag.BoolVar(&f.Progress, "progress", false, "Show progress bars")
+	flag.BoolVar(&f.All, "a", false, "")
+	flag.BoolVar(&f.All, "all", false, "")
+	flag.StringVar(&f.Profile, "profile", "", "")
+	flag.BoolVar(&f.Verbose, "v", false, "")
+	flag.BoolVar(&f.Verbose, "verbose", false, "")
+	flag.BoolVar(&f.Progress, "progress", false, "")
 	
 	// Utility flags
-	flag.BoolVar(&f.CreateConfig, "init", false, "Create default config file")
-	flag.BoolVar(&f.ShowStats, "stats", false, "Show domain statistics")
-	flag.StringVar(&f.NewSince, "new", "", "Show new domains since date (YYYY-MM-DD)")
-	
-	// Legacy compatibility flags (hidden from help)
-	var legacyAll bool
-	var legacyGeo bool
-	flag.BoolVar(&legacyAll, "a", false, "")
-	flag.BoolVar(&legacyGeo, "g", false, "")
+	flag.BoolVar(&f.CreateConfig, "init", false, "")
+	flag.BoolVar(&f.ShowStats, "s", false, "")
+	flag.BoolVar(&f.ShowStats, "stats", false, "")
+	flag.StringVar(&f.NewSince, "n", "", "")
+	flag.StringVar(&f.NewSince, "new", "", "")
+	flag.BoolVar(&f.ShowVersion, "version", false, "")
 	
 	flag.Parse()
-	
-	// Handle legacy flags
-	if legacyAll {
-		f.All = true
-	}
-	if legacyGeo {
-		f.GeoDNS = true
-	}
 	
 	return f
 }

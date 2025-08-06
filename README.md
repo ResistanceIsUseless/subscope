@@ -29,7 +29,15 @@ go install -v github.com/resistanceisuseless/subscope/cmd/subscope@latest
 ```bash
 git clone https://github.com/resistanceisuseless/subscope
 cd subscope
-go build -o subscope cmd/subscope/main.go
+
+# Simple build (dev version)
+go build -o subscope cmd/subscope/*.go
+
+# Or use the build script with version injection
+./build.sh
+
+# Build with custom version
+./build.sh 1.2.3
 ```
 
 ### Dependencies
@@ -66,7 +74,7 @@ subscope --domain example.com --all
 
 # Geographic DNS analysis only
 subscope -d example.com -g
-subscope -d example.com --geo-dns
+subscope --domain example.com --geo
 ```
 
 ### Modular Feature Selection (NEW)
@@ -77,54 +85,53 @@ SubScope now supports granular control over which enumeration modules to run:
 # Run only passive enumeration
 subscope -d example.com --passive
 
-# Combine specific features
-subscope -d example.com --passive --http
-subscope -d example.com --passive --geo --rdns
+# Combine specific features (short flags)
+subscope -d example.com -p -h
+subscope -d example.com -p -g -r
 
 # Run DNS brute forcing only
-subscope -d example.com --brute
+subscope -d example.com -b
 
-# Custom security testing workflow
-subscope -d example.com --passive --zone --ct
+# Custom security testing workflow  
+subscope -d example.com -p -z --ct
 ```
 
 ### Flag Options
 
-#### Core Flags
-- `-d`: Target domain to enumerate (required)
-- `-c`: Configuration file path
-- `-o`: Output file path (default: results.json, use '-' for stdout)
-- `-f`: Output format (json, csv, massdns, dnsx, aquatone, eyewitness)
+#### Target
+- `-d, --domain`: Target domain to enumerate (required)
 
-#### Feature Flags (Modular Control)
-- `--passive`: Passive enumeration via subfinder
-- `--zone`: DNS zone transfer attempts
-- `--http`: HTTP/HTTPS analysis via httpx  
-- `--brute`: DNS brute force via alterx
-- `--geo`: Geographic DNS analysis
-- `--rdns`: Reverse DNS lookups
+#### Input  
+- `-c, --config`: Configuration file path
+- `-i, --input`: File containing additional domains to scan
+- `-m, --merge`: Merge input domains with discovered domains
+
+#### Output
+- `-o, --output`: Output file path (default: results.json, use '-' for stdout)
+- `-f, --format`: Output format (json, csv, massdns, dnsx, aquatone, eyewitness)
+
+#### Enumeration Features
+- `-p, --passive`: Passive enumeration via subfinder
+- `-z, --zone`: DNS zone transfer attempts
+- `-h, --http`: HTTP/HTTPS analysis via httpx  
+- `-b, --brute`: DNS brute force via alterx
+- `-g, --geo`: Geographic DNS analysis
+- `-r, --rdns`: Reverse DNS lookups
 - `--ct`: Certificate transparency logs
 - `--arin`: ARIN/RDAP organization data
 - `--persist`: Domain history tracking
 
-#### Control Flags
-- `--all`: Enable all enumeration features
-- `--profile <name>`: Rate limit profile (stealth, normal, aggressive)
-- `-v`: Verbose output
+#### Control
+- `-a, --all`: Enable all enumeration features
+- `--profile`: Rate limit profile (stealth, normal, aggressive)
+- `-v, --verbose`: Verbose output
 - `--progress`: Show progress bars
 
-#### Input/Output Options
-- `--input <file>`: File containing additional domains
-- `--merge`: Merge input domains with discovered domains
-
-#### Utility Flags
+#### Utility
 - `--init`: Create default config file
-- `--stats`: Show domain statistics
-- `--new <date>`: Show new domains since date (YYYY-MM-DD)
-
-#### Legacy Compatibility
-- `-a`: Same as --all (for backward compatibility)
-- `-g`: Same as --geo (for backward compatibility)
+- `-s, --stats`: Show domain statistics
+- `-n, --new`: Show new domains since date (YYYY-MM-DD)
+- `--version`: Show version information
 
 ### Feature Selection Logic
 
@@ -154,19 +161,19 @@ subscope -d example.com -a
 subscope -d example.com -o results.json
 
 # CSV format
-subscope -d example.com -f csv -o results.csv
+subscope -d example.com --format csv --output results.csv
 
 # massdns format
 subscope -d example.com -f massdns -o domains.txt
 
 # dnsx format
-subscope -d example.com -f dnsx -o dnsx-input.txt
+subscope -d example.com --format dnsx --output dnsx-input.txt
 
 # Aquatone format (domain,ip,port)
 subscope -d example.com -f aquatone -o aquatone-input.txt
 
 # EyeWitness format (URL list)
-subscope -d example.com -f eyewitness -o eyewitness-urls.txt
+subscope -d example.com --format eyewitness --output eyewitness-urls.txt
 ```
 
 ### Input Domain Support
@@ -736,9 +743,45 @@ alterx:
 - The tool implements rate limiting and delays to be respectful to target infrastructure
 - User-agent rotation helps avoid detection but should not be used for malicious purposes
 
+## Version Management
+
+SubScope follows semantic versioning (SemVer):
+
+### Version Format: MAJOR.MINOR.PATCH
+- **MAJOR**: Breaking changes, incompatible API changes
+- **MINOR**: New features, backwards compatible
+- **PATCH**: Bug fixes, backwards compatible
+
+### Checking Version
+```bash
+subscope --version
+```
+
+### Version Information
+- Development builds show: `1.0.0 (dev build)`
+- Release builds show: `1.0.0 (abc1234, built 2025-01-31T10:30:00Z)`
+- JSON output includes version in metadata for automation
+
+### Building with Version Information
+```bash
+# Use build script for proper version injection
+./build.sh
+
+# Or specify custom version
+./build.sh 1.2.3
+
+# Manual build with version injection
+go build -ldflags "-X main.Version=1.2.3 -X main.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ) -X main.GitCommit=$(git rev-parse --short HEAD)" -o subscope cmd/subscope/*.go
+```
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit pull requests or open issues for bugs and feature requests.
+
+**Version Updates**: When submitting changes, update the version in:
+- `cmd/subscope/version.go` (primary source)
+- `internal/output/output.go` (keep in sync)
+- `VERSION` file (for build script)
 
 ## License
 
