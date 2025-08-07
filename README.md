@@ -127,6 +127,18 @@ subscope -d example.com -p -z --ct
 - `-v, --verbose`: Verbose output
 - `--progress`: Show progress bars
 
+#### ProxyHawk Integration
+- `--proxyhawk-url URL`: ProxyHawk server URL for enhanced geographic DNS
+- `--proxyhawk-regions REGIONS`: Comma-separated list of regions to query
+- `--proxyhawk-realtime`: Enable real-time monitoring features (experimental)
+
+#### Tool Integration & Execution Mode
+- `--exec-mode`: Force external tool execution instead of library integration
+- `--subfinder-args ARGS`: Custom arguments for subfinder executable
+- `--httpx-args ARGS`: Custom arguments for httpx executable
+- `--alterx-args ARGS`: Custom arguments for alterx executable
+- `--shuffledns-args ARGS`: Custom arguments for shuffledns executable
+
 #### Utility
 - `--init`: Create default config file
 - `-s, --stats`: Show domain statistics
@@ -200,6 +212,126 @@ subscope -d example.com -g -v
 
 # Combined with custom output format
 subscope -d example.com -g -f csv -o geo-results.csv
+```
+
+### ProxyHawk Integration (Enhanced Geographic DNS)
+
+SubScope integrates with [ProxyHawk](https://github.com/resistanceisuseless/proxyhawk) for advanced geographic DNS analysis with real proxy endpoints worldwide.
+
+#### ProxyHawk Server Setup
+First, set up ProxyHawk server to provide proxy endpoints:
+```bash
+# Install ProxyHawk server
+go install -v github.com/resistanceisuseless/proxyhawk/cmd/proxyhawk-server@latest
+
+# Start ProxyHawk server (default: localhost:8080)
+proxyhawk-server
+
+# Start on custom port
+proxyhawk-server -port 9090
+
+# Start with specific proxy regions
+proxyhawk-server -regions "us-east,us-west,eu-west,asia-pacific"
+```
+
+#### ProxyHawk Client Usage with SubScope
+```bash
+# Enable ProxyHawk integration for geographic DNS
+subscope -d example.com --geo --proxyhawk-url http://localhost:8080
+
+# Use custom ProxyHawk server
+subscope -d example.com -g --proxyhawk-url https://proxyhawk.company.com
+
+# Specify custom regions (comma-separated)
+subscope -d example.com --geo \
+  --proxyhawk-url http://localhost:8080 \
+  --proxyhawk-regions "us-east,us-west,eu-west"
+
+# Enable real-time monitoring (experimental)
+subscope -d example.com -g \
+  --proxyhawk-url http://localhost:8080 \
+  --proxyhawk-realtime
+
+# Combined with verbose output
+subscope -d example.com -g -v \
+  --proxyhawk-url http://localhost:8080 \
+  --proxyhawk-regions "us-east,eu-west,asia-pacific"
+```
+
+### Tool Integration & Custom Arguments
+
+SubScope integrates with external tools using both library mode (default) and exec mode (fallback/custom args).
+
+```bash
+# Force exec mode with default arguments
+subscope -d example.com --exec-mode
+
+# Exec mode with custom subfinder arguments
+subscope -d example.com --exec-mode \
+  --subfinder-args "-timeout 60 -sources crtsh,virustotal"
+
+# Exec mode with custom httpx arguments
+subscope -d example.com --exec-mode \
+  --httpx-args "-threads 50 -timeout 15 -screenshot"
+
+# Exec mode with custom alterx arguments  
+subscope -d example.com --exec-mode \
+  --alterx-args "-enrich -limit 5000 -p custom-patterns.txt"
+
+# Exec mode with custom shuffledns arguments
+subscope -d example.com --exec-mode \
+  --shuffledns-args "-t 100 -retries 3"
+
+# Combined custom arguments
+subscope -d example.com --exec-mode \
+  --subfinder-args "-sources shodan,censys" \
+  --httpx-args "-screenshot -tech-detect" \
+  --alterx-args "-enrich -limit 10000"
+```
+
+#### ProxyHawk Flags
+- `--proxyhawk-url URL`: ProxyHawk server URL (e.g., http://localhost:8080)
+- `--proxyhawk-regions REGIONS`: Comma-separated list of regions to query
+- `--proxyhawk-realtime`: Enable real-time monitoring features (experimental)
+
+#### ProxyHawk Benefits
+- **Real Proxy Endpoints**: Uses actual proxy servers worldwide vs. EDNS simulation
+- **Enhanced Accuracy**: More reliable geographic DNS resolution detection
+- **Comparison Mode**: Automatically compares traditional EDNS vs. ProxyHawk methods
+- **Custom Regions**: Specify exact geographic regions for testing
+- **Scalable Infrastructure**: Supports distributed proxy server deployments
+
+#### Example ProxyHawk Output
+```bash
+subscope -d example.com -g -v --proxyhawk-url http://localhost:8080
+
+# Output includes ProxyHawk comparison:
+ProxyHawk integration enabled: http://localhost:8080
+ProxyHawk regions configured: [us-east, us-west, eu-west, asia-pacific]
+Geographic DNS resolver status: {ProxyHawkAvailable:true Regions:4 TraditionalMethod:true}
+
+[Geographic Analysis - example.com]
+Traditional method: 12 domains, ProxyHawk method: 15 domains
+Differences found: 2
+  - cdn-proxy-us.example.com (found via ProxyHawk us-east)
+  - api-regional-eu.example.com (found via ProxyHawk eu-west)
+Recommendation: ProxyHawk method provides more comprehensive results
+```
+
+#### ProxyHawk Architecture
+```
+┌─────────────┐    HTTP/WebSocket    ┌─────────────────┐
+│   SubScope  │ ◄──────────────────► │ ProxyHawk Server│
+└─────────────┘                      └─────────────────┘
+                                              │
+                                              ▼
+                                     ┌─────────────────┐
+                                     │   Proxy Pool    │
+                                     │ ┌─────┬─────────┤
+                                     │ │US-E │ US-W    │
+                                     │ │EU-W │ ASIA-P  │
+                                     │ └─────┴─────────┤
+                                     └─────────────────┘
 ```
 
 ### Progress Indicators
@@ -661,6 +793,197 @@ subscope --domain example.com --all
 - **Geo-blocked Content**: Discovers region-restricted subdomains
 - **CDN Intelligence**: Maps global CDN distribution patterns
 - **Security Testing**: Identifies region-specific attack surfaces
+
+### ProxyHawk Enhanced Geographic DNS
+
+SubScope integrates with ProxyHawk for next-generation geographic DNS analysis using real proxy endpoints worldwide instead of EDNS simulation.
+
+#### Traditional vs ProxyHawk Comparison
+
+**Traditional EDNS Method:**
+- Uses RFC 7871 EDNS Client Subnet extension
+- Simulates geographic location via IP subnet hints
+- Limited to DNS provider support for EDNS
+- May not accurately reflect real-world routing
+
+**ProxyHawk Method:**
+- Uses actual proxy servers in different regions
+- Performs real DNS queries from each geographic location
+- Bypasses EDNS limitations and DNS provider restrictions
+- Provides authentic geographic DNS behavior
+
+#### ProxyHawk Setup & Deployment
+
+##### Single Server Setup
+```bash
+# Install ProxyHawk server
+go install -v github.com/resistanceisuseless/proxyhawk/cmd/proxyhawk-server@latest
+
+# Basic server startup
+proxyhawk-server -port 8080
+
+# Server with specific proxy regions
+proxyhawk-server -port 8080 -regions "us-east,us-west,eu-west,asia-pacific"
+
+# Server with custom proxy configuration
+proxyhawk-server -config /path/to/proxyhawk-config.yaml
+```
+
+##### Enterprise Deployment
+```bash
+# Deploy ProxyHawk server with high availability
+docker run -d --name proxyhawk-server \
+  -p 8080:8080 \
+  -e PROXYHAWK_REGIONS="us-east,us-west,eu-west,eu-east,asia-pacific,asia-east" \
+  -e PROXYHAWK_PROXY_TIMEOUT=30s \
+  resistanceisuseless/proxyhawk:latest
+
+# Load balancer configuration for multiple ProxyHawk instances
+# (Configure your load balancer to distribute across multiple ProxyHawk servers)
+```
+
+#### Advanced ProxyHawk Usage
+
+##### Custom Region Testing
+```bash
+# Test specific geographic regions only
+subscope -d example.com --geo \
+  --proxyhawk-url http://proxyhawk.company.com \
+  --proxyhawk-regions "us-east,eu-west" \
+  --verbose
+
+# Enterprise multi-region analysis  
+subscope -d company.com --geo \
+  --proxyhawk-url https://proxyhawk-lb.company.com \
+  --proxyhawk-regions "us-east,us-west,eu-west,eu-east,asia-pacific,asia-east"
+```
+
+##### Comparison Analysis
+```bash
+# Run both traditional and ProxyHawk methods for comparison
+subscope -d example.com --geo --verbose \
+  --proxyhawk-url http://localhost:8080
+
+# Example output:
+# [Geographic Analysis - example.com]
+# Traditional method: 8 domains, ProxyHawk method: 12 domains  
+# Differences found: 3
+#   - cdn-us-east.example.com (found via ProxyHawk us-east)
+#   - api-eu-central.example.com (found via ProxyHawk eu-west)
+#   - cache-asia.example.com (found via ProxyHawk asia-pacific)
+# Recommendation: ProxyHawk method provides more comprehensive results
+```
+
+##### Real-Time Monitoring (Experimental)
+```bash
+# Enable real-time geographic DNS monitoring
+subscope -d example.com --geo \
+  --proxyhawk-url http://localhost:8080 \
+  --proxyhawk-realtime \
+  --verbose
+
+# Real-time features (when implemented):
+# - Continuous monitoring of geographic DNS changes
+# - WebSocket connection for live updates  
+# - Alert on new region-specific subdomains
+# - Historical tracking of geographic DNS patterns
+```
+
+#### ProxyHawk Configuration
+
+##### Client Configuration
+ProxyHawk settings can be configured via flags or configuration file:
+
+```yaml
+# ~/.config/subscope/config.yaml
+proxyhawk:
+  server_url: "http://localhost:8080"
+  default_regions: ["us-east", "us-west", "eu-west", "asia-pacific"]
+  timeout: 30s
+  enable_comparison: true
+  realtime_monitoring: false
+```
+
+##### Server Configuration
+ProxyHawk server configuration example:
+
+```yaml
+# /etc/proxyhawk/config.yaml
+server:
+  port: 8080
+  host: "0.0.0.0"
+
+proxy_regions:
+  us-east:
+    proxy_url: "http://proxy-us-east.company.com:8080"
+    location: "US East Coast (Virginia)"
+  us-west:
+    proxy_url: "http://proxy-us-west.company.com:8080" 
+    location: "US West Coast (California)"
+  eu-west:
+    proxy_url: "http://proxy-eu-west.company.com:8080"
+    location: "Europe West (Ireland)"
+
+timeouts:
+  dns_query: 10s
+  proxy_connect: 5s
+  total_request: 30s
+```
+
+#### ProxyHawk Benefits for Security Testing
+
+1. **Bypass Geographic Restrictions**: Access region-locked content and subdomains
+2. **CDN Edge Discovery**: Find CDN edge servers in specific regions
+3. **Infrastructure Mapping**: Map global infrastructure distribution
+4. **Compliance Testing**: Verify geographic data residency requirements
+5. **Security Assessment**: Test region-specific attack surfaces
+6. **Monitoring & Alerting**: Detect new geographic deployments
+
+#### ProxyHawk Use Cases
+
+##### Bug Bounty & Penetration Testing
+```bash
+# Comprehensive geographic reconnaissance  
+subscope -d target.com --all \
+  --proxyhawk-url http://proxyhawk-server.local:8080 \
+  --proxyhawk-regions "us-east,us-west,eu-west,asia-pacific" \
+  --output target_geographic_analysis.json
+
+# Extract region-specific targets
+cat target_geographic_analysis.json | \
+  jq -r '.resolved_domains[] | select(.geodns.found_in_regions | length < 6) | .domain' \
+  > region_specific_targets.txt
+```
+
+##### Infrastructure Monitoring
+```bash
+# Monitor geographic DNS changes
+subscope -d company.com --geo \
+  --proxyhawk-url https://internal-proxyhawk.company.com \
+  --persistence \
+  --new-since $(date -d '1 day ago' +%Y-%m-%d)
+
+# Alert on new geographic subdomains
+subscope -d company.com --geo \
+  --proxyhawk-url https://internal-proxyhawk.company.com \
+  --output - | \
+  jq -r '.resolved_domains[] | select(.geodns.found_in_regions | length == 1) | 
+    "ALERT: Region-specific subdomain detected: \(.domain) in \(.geodns.found_in_regions[])"'
+```
+
+##### Performance Optimization
+```bash
+# Identify CDN distribution gaps
+subscope -d company.com --geo \
+  --proxyhawk-url https://proxyhawk.company.com \
+  --output cdn_analysis.json
+
+# Extract missing regions for CDN optimization  
+cat cdn_analysis.json | \
+  jq -r '.resolved_domains[] | select(.domain | contains("cdn")) | 
+    {domain: .domain, missing_regions: .geodns.missing_in_regions} | 
+    select(.missing_regions | length > 0)'
+```
 
 ### Rate Limit Profiles
 
