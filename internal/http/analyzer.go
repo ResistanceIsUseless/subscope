@@ -39,7 +39,52 @@ func New(config *config.Config) *Analyzer {
 }
 
 func (h *Analyzer) AnalyzeDomains(ctx context.Context, domains []string, targetDomain string) ([]string, error) {
-	fmt.Fprintf(os.Stderr, "Starting httpx analysis for %d domains...\n", len(domains))
+	// Determine integration mode for httpx
+	mode := h.determineHTTPXMode()
+	
+	switch mode {
+	case "library":
+		return h.analyzeDomainsLibrary(ctx, domains, targetDomain)
+	case "exec":
+		return h.analyzeDomainsExec(ctx, domains, targetDomain)
+	default:
+		// Auto mode: try library first, fallback to exec
+		result, err := h.analyzeDomainsLibrary(ctx, domains, targetDomain)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Library mode failed (%v), falling back to exec mode\n", err)
+			return h.analyzeDomainsExec(ctx, domains, targetDomain)
+		}
+		return result, nil
+	}
+}
+
+func (h *Analyzer) determineHTTPXMode() string {
+	// Check legacy exec mode flag first (highest priority for backwards compatibility)
+	if h.config.ExecMode.Enabled {
+		return "exec"
+	}
+	
+	// Check explicit httpx configuration
+	if h.config.Integration.HTTPX != "" {
+		return h.config.Integration.HTTPX
+	}
+	
+	// Check global mode
+	if h.config.Integration.Mode != "" {
+		return h.config.Integration.Mode
+	}
+	
+	// Default to auto mode (library preferred with exec fallback)
+	return "auto"
+}
+
+func (h *Analyzer) analyzeDomainsLibrary(ctx context.Context, domains []string, targetDomain string) ([]string, error) {
+	httpxLib := NewHTTPXLibrary(h.config)
+	return httpxLib.AnalyzeDomains(ctx, domains, targetDomain)
+}
+
+func (h *Analyzer) analyzeDomainsExec(ctx context.Context, domains []string, targetDomain string) ([]string, error) {
+	fmt.Fprintf(os.Stderr, "Starting httpx analysis (exec mode) for %d domains...\n", len(domains))
 	
 	// Check if httpx is available
 	if _, err := exec.LookPath("httpx"); err != nil {
@@ -54,22 +99,40 @@ func (h *Analyzer) AnalyzeDomains(ctx context.Context, domains []string, targetD
 	}
 	
 	// Build httpx command
-	args := []string{
-		"-json",                    // JSON output
-		"-silent",                  // Suppress banner
-		"-no-color",               // No color output
-		"-timeout", "10",          // 10 second timeout
-		"-retries", "1",           // 1 retry
-		"-threads", "20",          // 20 threads
-		"-follow-redirects",       // Follow redirects
-		"-tls-probe",              // Extract TLS data
-		"-csp-probe",              // Extract CSP headers
-		"-location",               // Include redirect location
-		"-tech-detect",            // Technology detection
-		"-web-server",             // Extract web server
-		"-status-code",            // Include status code
-		"-content-length",         // Include content length
-		"-response-time",          // Include response time
+	var args []string
+	
+	// Check if custom args are provided
+	if h.config.ExecMode.HTTPXArgs != "" {
+		// Use custom args but ensure required flags
+		customArgs := strings.Fields(h.config.ExecMode.HTTPXArgs)
+		args = customArgs
+		// Ensure JSON output if not specified
+		if !contains(customArgs, "-json") && !contains(customArgs, "-j") {
+			args = append([]string{"-json"}, args...)
+		}
+		// Ensure silent mode if not specified
+		if !contains(customArgs, "-silent") && !contains(customArgs, "-s") {
+			args = append(args, "-silent")
+		}
+	} else {
+		// Use default args
+		args = []string{
+			"-json",                    // JSON output
+			"-silent",                  // Suppress banner
+			"-no-color",               // No color output
+			"-timeout", "10",          // 10 second timeout
+			"-retries", "1",           // 1 retry
+			"-threads", "20",          // 20 threads
+			"-follow-redirects",       // Follow redirects
+			"-tls-probe",              // Extract TLS data
+			"-csp-probe",              // Extract CSP headers
+			"-location",               // Include redirect location
+			"-tech-detect",            // Technology detection
+			"-web-server",             // Extract web server
+			"-status-code",            // Include status code
+			"-content-length",         // Include content length
+			"-response-time",          // Include response time
+		}
 	}
 	
 	cmd := exec.CommandContext(ctx, "httpx", args...)
@@ -271,5 +334,15 @@ func (h *Analyzer) isValidSubdomain(subdomain, targetDomain string) bool {
 		return true
 	}
 	
+	return false
+}
+
+// contains checks if a string slice contains a specific string
+func contains(slice []string, str string) bool {
+	for _, s := range slice {
+		if s == str {
+			return true
+		}
+	}
 	return false
 }

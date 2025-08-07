@@ -1,0 +1,29 @@
+{
+  "metadata": {
+    "version": "1.0",
+    "timestamp": "2025-08-06T13:19:26.668338-07:00",
+    "tool": {
+      "name": "SubScope",
+      "version": "1.0.0"
+    },
+    "target": "github.io",
+    "scan_type": "passive+zone_transfer+httpx+rdns+geodns+resolution"
+  },
+  "statistics": {
+    "domains_resolved": 0,
+    "domains_discovered": 0,
+    "domains_generated_failed": 0,
+    "execution_time": 583,
+    "sources": [
+      "subfinder",
+      "zone_transfer",
+      "alterx",
+      "httpx",
+      "rdns",
+      "rdns_range",
+      "geodns",
+      "dns_resolution"
+    ]
+  },
+  "resolved_domains": null
+}

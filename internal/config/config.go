@@ -46,6 +46,13 @@ func setDefaults(config *Config) {
 	config.AlterX.EnableEnrichment = true
 	config.AlterX.MaxPermutations = 10000
 	
+	// Integration mode defaults (library preferred with exec fallback)
+	config.Integration.Mode = "auto"
+	config.Integration.Subfinder = "auto"  // Library preferred for subfinder
+	config.Integration.HTTPX = "auto"      // Library preferred for httpx
+	config.Integration.AlterX = "exec"     // Exec mode for alterx (no stable library API)
+	config.Integration.ShuffleDNS = "exec" // Exec mode for shuffledns (CLI-focused tool)
+	
 	// Default feature flags (conservative set)
 	config.Features.Passive = true
 	config.Features.ZoneTransfer = true
@@ -153,6 +160,20 @@ func (c *Config) OverrideFeatures(features map[string]bool) {
 
 func CreateDefault() error {
 	configDir := filepath.Join(os.Getenv("HOME"), ".config", "subscope")
+	
+	// Check if there's a file where we want to create the directory
+	if stat, err := os.Stat(configDir); err == nil {
+		if !stat.IsDir() {
+			// Move existing file to backup location
+			backupPath := configDir + ".backup"
+			fmt.Printf("Backing up existing config file to %s\n", backupPath)
+			if err := os.Rename(configDir, backupPath); err != nil {
+				return fmt.Errorf("failed to backup existing config file: %w", err)
+			}
+		}
+	}
+	
+	// Create config directory
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
@@ -161,6 +182,7 @@ func CreateDefault() error {
 	
 	// Check if config already exists
 	if _, err := os.Stat(configPath); err == nil {
+		fmt.Printf("Configuration already exists at: %s\n", configPath)
 		return nil // Config already exists
 	}
 	

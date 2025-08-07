@@ -91,6 +91,24 @@ type Config struct {
 	// Runtime configuration (not from YAML)
 	Verbose bool
 	ActiveProfile string // Which profile is currently active
+	
+	// Integration mode configuration
+	Integration struct {
+		Mode      string `yaml:"mode"`       // library, exec, auto
+		Subfinder string `yaml:"subfinder"`  // library, exec, auto
+		HTTPX     string `yaml:"httpx"`      // library, exec, auto  
+		AlterX    string `yaml:"alterx"`    // library, exec, auto
+		ShuffleDNS string `yaml:"shuffledns"` // library, exec, auto
+	} `yaml:"integration"`
+	
+	// Exec mode arguments (from command line)
+	ExecMode struct {
+		Enabled        bool
+		SubfinderArgs  string
+		HTTPXArgs      string
+		AlterXArgs     string
+		ShuffleDNSArgs string
+	}
 }
 
 // APIKeys holds API keys for various subfinder data sources

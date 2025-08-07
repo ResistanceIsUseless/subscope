@@ -40,16 +40,29 @@ func (a *Integration) GenerateDynamicWordlist(ctx context.Context, discoveredSub
 	fmt.Printf("Generating dynamic wordlist from %d discovered subdomains...\n", len(discoveredSubdomains))
 
 	// Build alterx command
-	args := []string{"-silent"}
+	var args []string
 	
-	if a.config.AlterX.EnableEnrichment {
-		args = append(args, "-enrich")
-	}
+	// Check if custom args are provided
+	if a.config.ExecMode.AlterXArgs != "" {
+		// Use custom args but ensure silent mode
+		customArgs := strings.Fields(a.config.ExecMode.AlterXArgs)
+		args = customArgs
+		if !contains(customArgs, "-silent") && !contains(customArgs, "-s") {
+			args = append(args, "-silent")
+		}
+	} else {
+		// Use default args
+		args = []string{"-silent"}
+		
+		if a.config.AlterX.EnableEnrichment {
+			args = append(args, "-enrich")
+		}
 
-	// Add patterns if specified
-	if len(a.config.AlterX.Patterns) > 0 {
-		for _, pattern := range a.config.AlterX.Patterns {
-			args = append(args, "-p", pattern)
+		// Add patterns if specified
+		if len(a.config.AlterX.Patterns) > 0 {
+			for _, pattern := range a.config.AlterX.Patterns {
+				args = append(args, "-p", pattern)
+			}
 		}
 	}
 
@@ -153,4 +166,14 @@ func (a *Integration) isValidDomain(domain string) bool {
 	}
 	
 	return true
+}
+
+// contains checks if a string slice contains a specific string
+func contains(slice []string, str string) bool {
+	for _, s := range slice {
+		if s == str {
+			return true
+		}
+	}
+	return false
 }

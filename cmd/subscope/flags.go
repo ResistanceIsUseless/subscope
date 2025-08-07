@@ -29,11 +29,24 @@ type Flags struct {
 	ARINLookup           bool
 	Persistence          bool
 	
+	// ProxyHawk Integration
+	ProxyHawkURL         string
+	ProxyHawkRegions     string
+	ProxyHawkRealTime    bool
+	ProxyHawkForce       bool
+	
 	// Control Options
 	All          bool
 	Profile      string
 	Verbose      bool
 	Progress     bool
+	
+	// Exec Mode Options
+	ExecMode      bool
+	SubfinderArgs string
+	HTTPXArgs     string
+	AlterXArgs    string
+	ShuffleDNSArgs string
 	
 	// Utility
 	CreateConfig bool
@@ -89,11 +102,24 @@ ENUMERATION:
    --arin                 ARIN/RDAP organization data
    --persist              domain history tracking
 
+PROXYHAWK INTEGRATION:
+   --proxyhawk-url        ProxyHawk WebSocket URL (e.g., ws://localhost:8888/ws)
+   --proxyhawk-regions    comma-separated list of regions (us-west,us-east,eu-west)
+   --proxyhawk-realtime   enable real-time domain monitoring
+   --proxyhawk-force      force ProxyHawk usage even if traditional methods available
+
 CONTROL:
    -a, --all              enable all enumeration features
    --profile string       rate limit profile (stealth,normal,aggressive)
    -v, --verbose          verbose output
    --progress             show progress bars
+
+EXEC MODE:
+   --exec-mode            use external executables instead of libraries (future)
+   --subfinder-args       custom arguments for subfinder executable
+   --httpx-args           custom arguments for httpx executable  
+   --alterx-args          custom arguments for alterx executable
+   --shuffledns-args      custom arguments for shuffledns executable
 
 UTILITY:
    --init                 create default config file
@@ -157,6 +183,12 @@ RATE LIMIT PROFILES:
 	flag.BoolVar(&f.ARINLookup, "arin", false, "")
 	flag.BoolVar(&f.Persistence, "persist", false, "")
 	
+	// ProxyHawk integration flags
+	flag.StringVar(&f.ProxyHawkURL, "proxyhawk-url", "", "")
+	flag.StringVar(&f.ProxyHawkRegions, "proxyhawk-regions", "", "")
+	flag.BoolVar(&f.ProxyHawkRealTime, "proxyhawk-realtime", false, "")
+	flag.BoolVar(&f.ProxyHawkForce, "proxyhawk-force", false, "")
+	
 	// Control flags
 	flag.BoolVar(&f.All, "a", false, "")
 	flag.BoolVar(&f.All, "all", false, "")
@@ -164,6 +196,13 @@ RATE LIMIT PROFILES:
 	flag.BoolVar(&f.Verbose, "v", false, "")
 	flag.BoolVar(&f.Verbose, "verbose", false, "")
 	flag.BoolVar(&f.Progress, "progress", false, "")
+	
+	// Exec mode flags
+	flag.BoolVar(&f.ExecMode, "exec-mode", false, "")
+	flag.StringVar(&f.SubfinderArgs, "subfinder-args", "", "")
+	flag.StringVar(&f.HTTPXArgs, "httpx-args", "", "")
+	flag.StringVar(&f.AlterXArgs, "alterx-args", "", "")
+	flag.StringVar(&f.ShuffleDNSArgs, "shuffledns-args", "", "")
 	
 	// Utility flags
 	flag.BoolVar(&f.CreateConfig, "init", false, "")

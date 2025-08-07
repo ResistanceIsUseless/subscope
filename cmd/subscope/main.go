@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/resistanceisuseless/subscope/internal/alterx"
@@ -32,6 +33,13 @@ func NewSubScope(cfg *config.Config) *SubScope {
 	return &SubScope{
 		config: cfg,
 	}
+}
+
+// Global reference to flags for ProxyHawk integration
+var globalFlags *Flags
+
+func parseProxyHawkFlags() *Flags {
+	return globalFlags
 }
 
 func (s *SubScope) Run(ctx context.Context, domain string, inputDomainsPath string, mergeMode bool, enableProgress bool) error {
@@ -225,6 +233,14 @@ func (s *SubScope) Run(ctx context.Context, domain string, inputDomainsPath stri
 			rdnsResults := enumerator.ProcessRDNSDomains(rdnsDomains)
 			results = append(results, rdnsResults...)
 			fmt.Fprintf(os.Stderr, "Added %d RDNS-discovered domains to enumeration results\n", len(rdnsDomains))
+			
+			// Show discovered domains in verbose mode or if small count
+			if s.config.Verbose || len(rdnsDomains) <= 10 {
+				fmt.Fprintf(os.Stderr, "RDNS discovered domains: %v\n", rdnsDomains[:min(len(rdnsDomains), 10)])
+				if len(rdnsDomains) > 10 {
+					fmt.Fprintf(os.Stderr, "... and %d more (use -v to see all)\n", len(rdnsDomains)-10)
+				}
+			}
 		}
 		
 		// Phase 2.6: Enhanced RDNS - IP range scanning (similar to dnsrecon)
@@ -237,6 +253,14 @@ func (s *SubScope) Run(ctx context.Context, domain string, inputDomainsPath stri
 			rdnsRangeResults := enumerator.ProcessRDNSRangeDomains(rdnsRangeDomains)
 			results = append(results, rdnsRangeResults...)
 			fmt.Fprintf(os.Stderr, "Added %d RDNS range-discovered domains to enumeration results\n", len(rdnsRangeDomains))
+			
+			// Show discovered domains in verbose mode or if small count
+			if s.config.Verbose || len(rdnsRangeDomains) <= 10 {
+				fmt.Fprintf(os.Stderr, "RDNS range discovered domains: %v\n", rdnsRangeDomains[:min(len(rdnsRangeDomains), 10)])
+				if len(rdnsRangeDomains) > 10 {
+					fmt.Fprintf(os.Stderr, "... and %d more (use -v to see all)\n", len(rdnsRangeDomains)-10)
+				}
+			}
 		}
 	} else {
 		progressTracker.Info("RDNS analysis disabled")
@@ -245,7 +269,44 @@ func (s *SubScope) Run(ctx context.Context, domain string, inputDomainsPath stri
 	// Phase 2.8: Geographic DNS analysis
 	if s.config.Features.GeoDNS {
 		fmt.Fprintln(os.Stderr, "Phase 2.8: Geographic DNS analysis...")
-		geoDNS := dns.NewGeoDNSResolver(s.config)
+		
+		// Use enhanced GeoDNS resolver with ProxyHawk support if configured
+		var proxyHawkURL string
+		if flags := parseProxyHawkFlags(); flags != nil && flags.ProxyHawkURL != "" {
+			proxyHawkURL = flags.ProxyHawkURL
+			if s.config.Verbose {
+				fmt.Fprintf(os.Stderr, "ProxyHawk integration enabled: %s\n", proxyHawkURL)
+			}
+		}
+		
+		geoDNS := dns.NewEnhancedGeoDNSResolver(s.config, proxyHawkURL)
+		defer geoDNS.Close() // Ensure cleanup
+		
+		// Configure ProxyHawk regions if specified
+		if flags := parseProxyHawkFlags(); flags != nil && flags.ProxyHawkRegions != "" {
+			regions := strings.Split(flags.ProxyHawkRegions, ",")
+			for i, region := range regions {
+				regions[i] = strings.TrimSpace(region)
+			}
+			geoDNS.SetRegions(regions)
+			if s.config.Verbose {
+				fmt.Fprintf(os.Stderr, "ProxyHawk regions configured: %v\n", regions)
+			}
+		}
+		
+		// Enable real-time updates if requested
+		if flags := parseProxyHawkFlags(); flags != nil && flags.ProxyHawkRealTime && geoDNS.IsProxyHawkAvailable() {
+			// This will be implemented when real-time features are added
+			if s.config.Verbose {
+				fmt.Fprintf(os.Stderr, "ProxyHawk real-time monitoring enabled\n")
+			}
+		}
+		
+		// Display connection status
+		if s.config.Verbose {
+			status := geoDNS.GetStatus()
+			fmt.Fprintf(os.Stderr, "Geographic DNS resolver status: %v\n", status)
+		}
 		
 		// Get domains to test (both the target domain and resolved domains)
 		var domainsToTest []string
@@ -280,14 +341,24 @@ func (s *SubScope) Run(ctx context.Context, domain string, inputDomainsPath stri
 			// Add geo-enriched results to main results
 			results = append(results, geoResults...)
 			
-			// Also run legacy analysis for summary display
-			legacyGeoResults, _ := geoDNS.QueryFromAllRegions(ctx, domain)
-			if len(legacyGeoResults) > 0 {
-				analysis := geoDNS.AnalyzeGeographicDifferences(legacyGeoResults)
-				
-				// Print geographic analysis
-				if s.config.Verbose || len(analysis.UniqueDomains) > 0 {
-					analysis.PrintAnalysis()
+			// Run comparison if ProxyHawk is available
+			if geoDNS.IsProxyHawkAvailable() {
+				comparison, err := geoDNS.CompareResults(ctx, []string{domain})
+				if err == nil && comparison != nil {
+					// Print comparison results
+					if s.config.Verbose || len(comparison.Differences) > 0 {
+						fmt.Printf("\n[Geographic Analysis - %s]\n", domain)
+						fmt.Printf("Traditional method: %v, ProxyHawk method: %v\n", comparison.TraditionalMethod, comparison.ProxyHawkMethod)
+						if len(comparison.Differences) > 0 {
+							fmt.Printf("Differences found: %d\n", len(comparison.Differences))
+							for _, diff := range comparison.Differences {
+								fmt.Printf("  - %s\n", diff)
+							}
+						}
+						if comparison.Recommendation != "" {
+							fmt.Printf("Recommendation: %s\n", comparison.Recommendation)
+						}
+					}
 				}
 			}
 			
@@ -345,6 +416,7 @@ func (s *SubScope) Run(ctx context.Context, domain string, inputDomainsPath stri
 func main() {
 	// Parse command line flags
 	flags := parseFlags()
+	globalFlags = flags // Set global reference for ProxyHawk integration
 	
 	// Handle utility commands first
 	if flags.ShowVersion {
@@ -443,6 +515,13 @@ func main() {
 	cfg.Output.Format = flags.Format
 	cfg.Output.File = flags.Output
 	cfg.Verbose = flags.Verbose
+	
+	// Apply exec mode settings
+	cfg.ExecMode.Enabled = flags.ExecMode
+	cfg.ExecMode.SubfinderArgs = flags.SubfinderArgs
+	cfg.ExecMode.HTTPXArgs = flags.HTTPXArgs
+	cfg.ExecMode.AlterXArgs = flags.AlterXArgs
+	cfg.ExecMode.ShuffleDNSArgs = flags.ShuffleDNSArgs
 	
 	// Run SubScope
 	subscope := NewSubScope(cfg)

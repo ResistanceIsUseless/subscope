@@ -84,7 +84,66 @@ func New(config *config.Config) *Enumerator {
 }
 
 func (e *Enumerator) RunPassiveEnumeration(ctx context.Context, domain string) ([]string, error) {
-	fmt.Fprintf(os.Stderr, "Running passive enumeration for domain: %s\n", domain)
+	// Determine integration mode for subfinder
+	mode := e.determineSubfinderMode()
+	
+	switch mode {
+	case IntegrationModeLibrary:
+		return e.runPassiveEnumerationLibrary(ctx, domain)
+	case IntegrationModeExec:
+		return e.runPassiveEnumerationExec(ctx, domain)
+	default:
+		// Auto mode: try library first, fallback to exec
+		domains, err := e.runPassiveEnumerationLibrary(ctx, domain)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Library mode failed (%v), falling back to exec mode\n", err)
+			return e.runPassiveEnumerationExec(ctx, domain)
+		}
+		return domains, nil
+	}
+}
+
+func (e *Enumerator) determineSubfinderMode() IntegrationMode {
+	// Check legacy exec mode flag first (highest priority for backwards compatibility)
+	if e.config.ExecMode.Enabled {
+		return IntegrationModeExec
+	}
+	
+	// Check explicit subfinder configuration
+	if e.config.Integration.Subfinder != "" {
+		switch e.config.Integration.Subfinder {
+		case "library":
+			return IntegrationModeLibrary
+		case "exec":
+			return IntegrationModeExec
+		case "auto":
+			return IntegrationModeAuto
+		}
+	}
+	
+	// Check global mode
+	if e.config.Integration.Mode != "" {
+		switch e.config.Integration.Mode {
+		case "library":
+			return IntegrationModeLibrary
+		case "exec":
+			return IntegrationModeExec
+		case "auto":
+			return IntegrationModeAuto
+		}
+	}
+	
+	// Default to auto mode (library preferred with exec fallback)
+	return IntegrationModeAuto
+}
+
+func (e *Enumerator) runPassiveEnumerationLibrary(ctx context.Context, domain string) ([]string, error) {
+	subfinderLib := NewSubfinderLibrary(e.config)
+	return subfinderLib.EnumerateSubdomains(ctx, domain)
+}
+
+func (e *Enumerator) runPassiveEnumerationExec(ctx context.Context, domain string) ([]string, error) {
+	fmt.Fprintf(os.Stderr, "Running passive enumeration (exec mode) for domain: %s\n", domain)
 	
 	// Check if subfinder is available
 	if _, err := exec.LookPath("subfinder"); err != nil {
@@ -92,23 +151,37 @@ func (e *Enumerator) RunPassiveEnumeration(ctx context.Context, domain string) (
 	}
 	
 	// Build subfinder command
-	args := []string{"-d", domain, "-silent"}
+	var args []string
 	
-	// Add providers if specified
-	if len(e.config.Subfinder.Providers) > 0 {
-		providers := strings.Join(e.config.Subfinder.Providers, ",")
-		args = append(args, "-sources", providers)
-	}
-	
-	// Add timeout if specified
-	if e.config.Subfinder.Timeout > 0 {
-		args = append(args, "-timeout", fmt.Sprintf("%d", e.config.Subfinder.Timeout))
-	}
-	
-	// Add config path if specified and file exists
-	if e.config.Subfinder.ConfigPath != "" {
-		// Skip adding config path for now - it might be causing issues
-		// args = append(args, "-config", e.config.Subfinder.ConfigPath)
+	// Check if custom args are provided
+	if e.config.ExecMode.SubfinderArgs != "" {
+		// Use custom args but ensure domain is included
+		customArgs := strings.Fields(e.config.ExecMode.SubfinderArgs)
+		args = append(args, "-d", domain)
+		args = append(args, customArgs...)
+		if !contains(customArgs, "-silent") && !contains(customArgs, "-s") {
+			args = append(args, "-silent")
+		}
+	} else {
+		// Use default args
+		args = []string{"-d", domain, "-silent"}
+		
+		// Add providers if specified
+		if len(e.config.Subfinder.Providers) > 0 {
+			providers := strings.Join(e.config.Subfinder.Providers, ",")
+			args = append(args, "-sources", providers)
+		}
+		
+		// Add timeout if specified
+		if e.config.Subfinder.Timeout > 0 {
+			args = append(args, "-timeout", fmt.Sprintf("%d", e.config.Subfinder.Timeout))
+		}
+		
+		// Add config path if specified and file exists
+		if e.config.Subfinder.ConfigPath != "" {
+			// Skip adding config path for now - it might be causing issues
+			// args = append(args, "-config", e.config.Subfinder.ConfigPath)
+		}
 	}
 	
 	
@@ -362,4 +435,14 @@ func isValidDomain(domain string) bool {
 	}
 	
 	return true
+}
+
+// contains checks if a string slice contains a specific string
+func contains(slice []string, str string) bool {
+	for _, s := range slice {
+		if s == str {
+			return true
+		}
+	}
+	return false
 }

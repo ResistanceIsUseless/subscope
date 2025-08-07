@@ -55,13 +55,27 @@ func (r *Resolver) ResolveDomains(ctx context.Context, results []enumeration.Dom
 	defer os.Remove(resolversFile)
 
 	// Build shuffledns command 
-	args := []string{
-		"-list", tmpFile.Name(),
-		"-r", resolversFile,
-		"-silent",
-		"-t", "50", // 50 threads for speed
-		"-retries", "2",
-		"-mode", "resolve",
+	var args []string
+	
+	// Check if custom args are provided
+	if r.config.ExecMode.ShuffleDNSArgs != "" {
+		// Use custom args but ensure required parameters
+		customArgs := strings.Fields(r.config.ExecMode.ShuffleDNSArgs)
+		args = append([]string{"-list", tmpFile.Name()}, customArgs...)
+		// Add resolvers file if not specified
+		if !contains(customArgs, "-r") && !contains(customArgs, "-resolvers") {
+			args = append(args, "-r", resolversFile)
+		}
+	} else {
+		// Use default args
+		args = []string{
+			"-list", tmpFile.Name(),
+			"-r", resolversFile,
+			"-silent",
+			"-t", "50", // 50 threads for speed
+			"-retries", "2",
+			"-mode", "resolve",
+		}
 	}
 
 	// Add output format
@@ -120,6 +134,16 @@ func (r *Resolver) ResolveDomains(ctx context.Context, results []enumeration.Dom
 	}
 
 	return results, nil
+}
+
+// contains checks if a string slice contains a specific string
+func contains(slice []string, str string) bool {
+	for _, s := range slice {
+		if s == str {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Resolver) createResolversFile() (string, error) {
