@@ -191,7 +191,7 @@ func (c *ProxyHawkWSClient) Disconnect() error {
 
 // TestDomainAsync sends test request without blocking
 func (c *ProxyHawkWSClient) TestDomainAsync(domain string, callback func(*ProxyHawkGeoTestResult, error)) error {
-	if !c.connected {
+	if !c.IsConnected() {
 		if err := c.Connect(); err != nil {
 			return err
 		}
@@ -288,8 +288,8 @@ func (c *ProxyHawkWSClient) BatchTest(ctx context.Context, domains []string) ([]
 	if len(domains) == 0 {
 		return []*ProxyHawkGeoTestResult{}, nil
 	}
-	
-	if !c.connected {
+
+	if !c.IsConnected() {
 		if err := c.Connect(); err != nil {
 			return nil, err
 		}
@@ -447,7 +447,9 @@ func (c *ProxyHawkWSClient) readPump() {
 		if c.conn != nil {
 			c.conn.Close()
 		}
+		c.reconnectMutex.Lock()
 		c.connected = false
+		c.reconnectMutex.Unlock()
 	}()
 	
 	for {

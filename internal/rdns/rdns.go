@@ -19,6 +19,7 @@ type Analyzer struct {
 	resolver    *net.Resolver
 	workers     int
 	rateLimiter chan struct{}
+	stopChan    chan struct{}
 }
 
 type RDNSResult struct {
@@ -27,21 +28,29 @@ type RDNSResult struct {
 	Source    string
 }
 
+// Close stops the rate limiter goroutine. Call when the Analyzer is no longer needed.
+func (r *Analyzer) Close() {
+	close(r.stopChan)
+}
+
 func New(config *config.Config) *Analyzer {
 	// Set up rate limiter for RDNS queries
 	rateLimit := 20 // Conservative rate limit for RDNS
 	if config.RateLimit.Global > 0 && config.RateLimit.Global < 50 {
 		rateLimit = config.RateLimit.Global
 	}
-	
+
 	rateLimiter := make(chan struct{}, rateLimit)
-	
+	stopChan := make(chan struct{})
+
 	// Start rate limiter goroutine
 	go func() {
 		ticker := time.NewTicker(time.Second / time.Duration(rateLimit))
 		defer ticker.Stop()
 		for {
 			select {
+			case <-stopChan:
+				return
 			case <-ticker.C:
 				select {
 				case rateLimiter <- struct{}{}:
@@ -51,12 +60,13 @@ func New(config *config.Config) *Analyzer {
 			}
 		}
 	}()
-	
+
 	return &Analyzer{
 		config:      config,
 		resolver:    &net.Resolver{},
 		workers:     10, // Conservative worker count for RDNS
 		rateLimiter: rateLimiter,
+		stopChan:    stopChan,
 	}
 }
 

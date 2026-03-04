@@ -16,11 +16,17 @@ import (
 )
 
 type Resolver struct {
-	config     *config.Config
-	resolvers  []*net.Resolver
-	workers    int
-	timeout    time.Duration
+	config      *config.Config
+	resolvers   []*net.Resolver
+	workers     int
+	timeout     time.Duration
 	rateLimiter chan struct{}
+	stopChan    chan struct{}
+}
+
+// Close stops the rate limiter goroutine. Call when the Resolver is no longer needed.
+func (r *Resolver) Close() {
+	close(r.stopChan)
 }
 
 func New(config *config.Config) *Resolver {
@@ -29,16 +35,19 @@ func New(config *config.Config) *Resolver {
 	if rateLimit <= 0 {
 		rateLimit = 50 // Default 50 requests per second
 	}
-	
+
 	// Create rate limiter channel
 	rateLimiter := make(chan struct{}, rateLimit)
-	
+	stopChan := make(chan struct{})
+
 	// Start rate limiter goroutine
 	go func() {
 		ticker := time.NewTicker(time.Second / time.Duration(rateLimit))
 		defer ticker.Stop()
 		for {
 			select {
+			case <-stopChan:
+				return
 			case <-ticker.C:
 				select {
 				case rateLimiter <- struct{}{}:
@@ -79,6 +88,7 @@ func New(config *config.Config) *Resolver {
 		workers:     20, // Default worker count
 		timeout:     5 * time.Second,
 		rateLimiter: rateLimiter,
+		stopChan:    stopChan,
 	}
 }
 

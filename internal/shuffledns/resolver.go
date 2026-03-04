@@ -178,10 +178,11 @@ func (r *Resolver) createResolversFile() (string, error) {
 	return tmpFile.Name(), nil
 }
 
-// ResolveDomainsFallback uses the built-in resolver if shuffledns is not available
+// ResolveDomainsFallback is intentionally not implemented in this package.
+// The actual fallback to the built-in DNS resolver is handled by the caller in main.go:
+// when ResolveDomains returns an error, the caller invokes dns.Resolver.ResolveDomains.
+// A direct import of the dns package here would create a circular dependency.
 func (r *Resolver) ResolveDomainsFallback(ctx context.Context, results []enumeration.DomainResult) []enumeration.DomainResult {
-	// This would fall back to the original DNS resolver implementation
-	// For now, we'll just return an error message
-	fmt.Fprintln(os.Stderr, "Warning: shuffledns not available, using built-in resolver (slower)")
+	fmt.Fprintln(os.Stderr, "Warning: ResolveDomainsFallback called directly; the caller should use dns.Resolver.ResolveDomains instead")
 	return results
 }

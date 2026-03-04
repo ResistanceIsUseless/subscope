@@ -2,8 +2,10 @@ package http
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/projectdiscovery/goflags"
@@ -151,14 +153,18 @@ func (h *HTTPXLibrary) extractDomainsFromResult(result runner.Result, targetDoma
 
 	// Extract from CSP (Content Security Policy) headers
 	if result.CSPData != nil {
-		// CSPData is a structured type - access its string representation or fields
-		cspStr := fmt.Sprintf("%v", result.CSPData)
-		if cspStr != "" && cspStr != "<nil>" {
-			extractedDomains := h.extractDomainsFromCSP(cspStr, targetDomain)
-			for _, domain := range extractedDomains {
-				if !domainSet[domain] {
-					domainSet[domain] = true
-					domains = append(domains, domain)
+		// JSON marshal the CSP struct so we get a consistent string representation
+		// with actual values (not Go syntax like &{map[...]}) that we can apply
+		// a domain regex to.
+		if jsonBytes, err := json.Marshal(result.CSPData); err == nil {
+			cspStr := string(jsonBytes)
+			if cspStr != "" && cspStr != "null" {
+				extractedDomains := h.extractDomainsFromCSP(cspStr, targetDomain)
+				for _, domain := range extractedDomains {
+					if !domainSet[domain] {
+						domainSet[domain] = true
+						domains = append(domains, domain)
+					}
 				}
 			}
 		}
@@ -195,61 +201,65 @@ func (h *HTTPXLibrary) extractDomainFromURL(urlStr string) string {
 	return strings.ToLower(urlStr)
 }
 
-// extractDomainsFromCSP extracts domains from CSP header
+// extractDomainsFromCSP extracts domains from a CSP string (raw header or JSON representation)
 func (h *HTTPXLibrary) extractDomainsFromCSP(csp, targetDomain string) []string {
 	var domains []string
-	// Simple CSP parsing - look for domain patterns
-	words := strings.Fields(csp)
-	for _, word := range words {
-		if strings.Contains(word, ".") && !strings.HasPrefix(word, "http") {
-			// Clean up CSP directives
-			domain := strings.TrimPrefix(word, "https://")
-			domain = strings.TrimPrefix(domain, "http://")
-			domain = strings.TrimSuffix(domain, ";")
-			domain = strings.TrimSpace(domain)
-
-			if h.isValidSubdomain(domain, targetDomain) {
-				domains = append(domains, domain)
-			}
+	domainRegex := regexp.MustCompile(`[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)+`)
+	matches := domainRegex.FindAllString(csp, -1)
+	for _, match := range matches {
+		domain := strings.ToLower(strings.TrimSpace(match))
+		if h.isValidSubdomain(domain, targetDomain) {
+			domains = append(domains, domain)
 		}
 	}
 	return domains
 }
 
-// extractDomainsFromTLS extracts domains from TLS certificate data
+// extractDomainsFromTLS extracts domains from TLS certificate data.
+// The httpx library returns a typed struct (e.g. *cryptoutil.SimpleX509Certificate),
+// not a map, so we JSON-marshal it first to get a consistent map representation
+// that matches the JSON field names used in exec mode ("subject_an", "subject_cn").
 func (h *HTTPXLibrary) extractDomainsFromTLS(tlsData interface{}, targetDomain string) []string {
 	var domains []string
 
-	// TLS data structure depends on httpx implementation
-	// This is a simplified extraction - may need adjustment based on actual structure
-	if tlsMap, ok := tlsData.(map[string]interface{}); ok {
-		// Look for subject alternative names
-		if san, exists := tlsMap["subject_an"]; exists {
-			if sanStr, ok := san.(string); ok {
-				sanDomains := strings.Split(sanStr, ",")
-				for _, domain := range sanDomains {
-					domain = strings.TrimSpace(domain)
-					// Remove wildcard prefix if present
-					if strings.HasPrefix(domain, "*.") {
-						domain = domain[2:]
-					}
+	jsonBytes, err := json.Marshal(tlsData)
+	if err != nil {
+		return domains
+	}
+
+	var tlsMap map[string]interface{}
+	if err := json.Unmarshal(jsonBytes, &tlsMap); err != nil {
+		return domains
+	}
+
+	// Subject Alternative Names
+	if san, exists := tlsMap["subject_an"]; exists {
+		switch v := san.(type) {
+		case string:
+			for _, domain := range strings.Split(v, ",") {
+				domain = strings.TrimSpace(strings.TrimPrefix(domain, "*."))
+				if h.isValidSubdomain(domain, targetDomain) {
+					domains = append(domains, domain)
+				}
+			}
+		case []interface{}:
+			for _, item := range v {
+				if s, ok := item.(string); ok {
+					domain := strings.TrimSpace(strings.TrimPrefix(s, "*."))
 					if h.isValidSubdomain(domain, targetDomain) {
 						domains = append(domains, domain)
 					}
 				}
 			}
 		}
+	}
 
-		// Check subject CN
-		if cn, exists := tlsMap["subject_cn"]; exists {
-			if cnStr, ok := cn.(string); ok {
-				domain := strings.TrimSpace(cnStr)
-				if strings.HasPrefix(domain, "*.") {
-					domain = domain[2:]
-				}
-				if h.isValidSubdomain(domain, targetDomain) {
-					domains = append(domains, domain)
-				}
+	// Subject Common Name
+	if cn, exists := tlsMap["subject_cn"]; exists {
+		if cnStr, ok := cn.(string); ok {
+			domain := strings.TrimSpace(strings.TrimPrefix(cnStr, "*."))
+			if h.isValidSubdomain(domain, targetDomain) {
+				domains = append(domains, domain)
 			}
 		}
 	}

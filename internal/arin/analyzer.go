@@ -20,6 +20,7 @@ type Analyzer struct {
 	httpClient  *http.Client
 	workers     int
 	rateLimiter chan struct{}
+	stopChan    chan struct{}
 }
 
 type RDAPResponse struct {
@@ -84,18 +85,26 @@ type OrganizationInfo struct {
 	Source       string
 }
 
+// Close stops the rate limiter goroutine. Call when the Analyzer is no longer needed.
+func (a *Analyzer) Close() {
+	close(a.stopChan)
+}
+
 func New(config *config.Config) *Analyzer {
 	// Set up rate limiter for RDAP queries (be respectful)
 	rateLimit := 5 // Conservative rate limit for RDAP APIs
-	
+
 	rateLimiter := make(chan struct{}, rateLimit)
-	
+	stopChan := make(chan struct{})
+
 	// Start rate limiter goroutine
 	go func() {
 		ticker := time.NewTicker(time.Second / time.Duration(rateLimit))
 		defer ticker.Stop()
 		for {
 			select {
+			case <-stopChan:
+				return
 			case <-ticker.C:
 				select {
 				case rateLimiter <- struct{}{}:
@@ -105,7 +114,7 @@ func New(config *config.Config) *Analyzer {
 			}
 		}
 	}()
-	
+
 	return &Analyzer{
 		config: config,
 		httpClient: &http.Client{
@@ -113,6 +122,7 @@ func New(config *config.Config) *Analyzer {
 		},
 		workers:     3, // Conservative worker count for RDAP
 		rateLimiter: rateLimiter,
+		stopChan:    stopChan,
 	}
 }
 
